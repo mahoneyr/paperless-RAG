@@ -47,7 +47,8 @@
         }
         .results.show { display: block; }
         #docPreview { max-height: 300px; overflow-y: auto; padding: 5px; }
-        .doc-preview { font-size: 13px; color: #666; margin: 8px 0; padding: 8px; background: white; border-left: 3px solid #0066cc; }
+        .doc-preview { font-size: 13px; color: #666; margin: 8px 0; padding: 8px; background: white; border-left: 3px solid #0066cc; display: flex; align-items: center; gap: 8px; }
+        .doc-preview input[type="checkbox"] { flex-shrink: 0; width: 15px; height: 15px; cursor: pointer; margin: 0; }
         .doc-preview a { color: #0066cc; text-decoration: none; }
         .doc-preview a:hover { text-decoration: underline; }
 
@@ -212,7 +213,7 @@
                 document.getElementById('docCount').textContent = indexedDocs.length;
                 const preview = document.getElementById('docPreview');
                 preview.innerHTML = indexedDocs.map(doc =>
-                    `<div class="doc-preview"><a href="${paperlessUrl}/documents/${doc.id}/details" target="_blank"><strong>${doc.title}</strong></a></div>`
+                    `<div class="doc-preview"><input type="checkbox" class="doc-checkbox" data-id="${doc.id}" checked><a href="${paperlessUrl}/documents/${doc.id}/details" target="_blank"><strong>${doc.title}</strong></a></div>`
                 ).join('');
 
                 document.getElementById('results').classList.add('show');
@@ -235,6 +236,15 @@
                 return;
             }
 
+            const checkedIds = new Set(
+                [...document.querySelectorAll('.doc-checkbox:checked')].map(cb => parseInt(cb.dataset.id))
+            );
+            const selectedDocs = indexedDocs.filter(doc => checkedIds.has(doc.id));
+            if (selectedDocs.length === 0) {
+                showAnswerStatus('Please select at least one document', 'error');
+                return;
+            }
+
             const btn = document.getElementById('askBtn');
             btn.disabled = true;
             showAnswerStatus('Ranking documents...', 'loading');
@@ -245,7 +255,7 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         question: question,
-                        documents: indexedDocs
+                        documents: selectedDocs
                     })
                 });
 
