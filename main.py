@@ -80,6 +80,7 @@ def get_filters():
     try:
         taxonomy = orchestrator.taxonomy
         return {
+            "paperless_url": os.getenv("PAPERLESS_PUBLIC_URL", os.environ["PAPERLESS_URL"]).rstrip("/"),
             "document_types": [{"id": dt, "name": dt} for dt in taxonomy.get("document_types", [])],
             "correspondents": [{"id": c, "name": c} for c in taxonomy.get("correspondents", [])],
             "tags": [{"id": t, "name": t} for t in taxonomy.get("tags", [])],

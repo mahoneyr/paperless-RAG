@@ -48,6 +48,8 @@
         .results.show { display: block; }
         #docPreview { max-height: 300px; overflow-y: auto; padding: 5px; }
         .doc-preview { font-size: 13px; color: #666; margin: 8px 0; padding: 8px; background: white; border-left: 3px solid #0066cc; }
+        .doc-preview a { color: #0066cc; text-decoration: none; }
+        .doc-preview a:hover { text-decoration: underline; }
 
         textarea { resize: vertical; min-height: 80px; }
 
@@ -128,6 +130,7 @@
 
     <script>
         let indexedDocs = null;
+        let paperlessUrl = '';
 
         // Cosine similarity function
         function cosineSimilarity(a, b) {
@@ -156,6 +159,7 @@
                 const res = await fetch('/api/filters');
                 const data = await res.json();
 
+                paperlessUrl = data.paperless_url || '';
                 populateSelect('docType', data.document_types);
                 populateSelect('correspondent', data.correspondents);
                 populateSelect('tags', data.tags);
@@ -208,7 +212,7 @@
                 document.getElementById('docCount').textContent = indexedDocs.length;
                 const preview = document.getElementById('docPreview');
                 preview.innerHTML = indexedDocs.map(doc =>
-                    `<div class="doc-preview"><strong>${doc.title}</strong> (ID: ${doc.id})</div>`
+                    `<div class="doc-preview"><a href="${paperlessUrl}/documents/${doc.id}/details" target="_blank"><strong>${doc.title}</strong></a></div>`
                 ).join('');
 
                 document.getElementById('results').classList.add('show');
