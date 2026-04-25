@@ -10,41 +10,43 @@ MAX_CHARS = 80000       # ~20k tokens for single-pass summarization
 DOC_MAX_CHARS = 20000   # per-document cap for map-reduce individual summaries
 EMBED_MAX_CHARS = 8000  # truncation for embedding input
 
-TRANSLATE_PROMPT = "Extract ONLY proper nouns, names, or company/provider types. Return just the search term(s), minimal words:\n\nQ: Have I received bills from Liberty Mutual?\nA: Liberty Mutual\n\nQ: What utilities do I pay?\nA: utilities\n\nQ: {question}\nA:"
-
 SUMMARIZE_PROMPT = """\
-The user asked: "{question}"
+Answer this question using only the documents below. Do not summarize the documents. \
+Give a direct, specific answer to the question. Include key facts, dates, and figures.
 
-Based on the following document(s), provide a concise summary that directly answers the question.
-Include key facts, dates, and figures where relevant.
+Question: {question}
 
+Documents:
 {documents}
 
-Summary:"""
+Answer:"""
 
 DOC_SUMMARIZE_PROMPT = """\
-The user asked: "{question}"
+Question: {question}
 
-Extract only the information from the document below that is relevant to answering that question.
-Be concise. If the document contains nothing relevant, reply with "Not relevant."
+Read the document below and extract only the facts that directly help answer the question above.
+Do not summarize the document. If the document contains nothing relevant, reply with "Not relevant."
 
 Document: {title}
 {content}
 
-Relevant information:"""
+Relevant facts:"""
 
 SYNTHESIZE_PROMPT = """\
-The user asked: "{question}"
+Answer this question using only the facts extracted below. Do not summarize. \
+Give a direct, specific answer. Include key facts, dates, and figures. \
+Ignore any entries marked "Not relevant."
 
-Below are summaries extracted from {doc_count} documents. Synthesize them into a single, \
-cohesive answer. Include key facts, dates, and figures. Ignore any summaries marked "Not relevant."
+Question: {question}
 
+Facts from {doc_count} documents:
 {summaries}
 
-Final answer:"""
+Answer:"""
 
 RAG_PROMPT = """\
-Answer the question based ONLY on the provided documents. Be direct and concise.
+Answer this question using only the documents below. Do not summarize the documents. \
+Be direct and specific.
 
 Question: {question}
 
@@ -103,12 +105,6 @@ class LLMClient:
             response = client.post(url, json=payload)
             response.raise_for_status()
             return response.json()["embeddings"][0]
-
-    def translate_query(self, question: str) -> str:
-        logger.info(f"Translating question to search query: {question!r}")
-        result = self._generate(TRANSLATE_PROMPT.format(question=question))
-        logger.info(f"Translated query: {result!r}")
-        return result or question
 
     def rank_documents(self, documents, question: str):
         logger.info(f"Embedding and ranking {len(documents)} documents")
