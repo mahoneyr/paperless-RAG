@@ -160,9 +160,13 @@ def search_answer(request: dict):
 
         scored = []
         for doc in documents:
-            # Embed document if not already embedded
             if "embedding" not in doc:
-                doc["embedding"] = llm_client._embed(f"{doc['title']}\n{doc['content']}")
+                try:
+                    doc["embedding"] = llm_client._embed(f"{doc['title']}\n{doc['content']}")
+                except Exception as e:
+                    logging.warning(f"Failed to embed '{doc.get('title')}': {e} — scoring 0")
+                    scored.append((0.0, doc))
+                    continue
             score = cosine_similarity(question_embedding, doc["embedding"])
             scored.append((score, doc))
 
