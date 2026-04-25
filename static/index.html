@@ -275,7 +275,7 @@
             document.getElementById('progressBar').classList.add('show');
 
             try {
-                const res = await fetch('/api/search/stream', {
+                const res = await fetch('/api/search/answer-stream', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({

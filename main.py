@@ -195,6 +195,109 @@ def search_answer(request: dict):
         raise HTTPException(status_code=500, detail="Could not generate answer")
 
 
+@app.post("/api/search/answer-stream")
+async def search_answer_stream(request: dict):
+    """Stream progress while answering a question about selected documents."""
+    if not request.get("question"):
+        raise HTTPException(status_code=400, detail="Question is required")
+    if not request.get("documents"):
+        raise HTTPException(status_code=400, detail="No documents provided")
+
+    progress_queue: queue.SimpleQueue = queue.SimpleQueue()
+
+    def progress(message: str):
+        progress_queue.put({"type": "progress", "message": message})
+
+    async def event_generator():
+        try:
+            question = request.get("question")
+            documents = request.get("documents", [])
+
+            def answer_task():
+                import math
+                progress("Ranking documents...")
+                question_embedding = llm_client._embed(question)
+
+                def cosine_similarity(a, b):
+                    dot = sum(x * y for x, y in zip(a, b))
+                    mag_a = math.sqrt(sum(x * x for x in a))
+                    mag_b = math.sqrt(sum(x * x for x in b))
+                    if mag_a == 0 or mag_b == 0:
+                        return 0.0
+                    return dot / (mag_a * mag_b)
+
+                scored = []
+                total = len(documents)
+                for idx, doc in enumerate(documents, 1):
+                    progress(f"Analyzing {idx}/{total}: {doc.get('title', 'Document')}")
+                    if "embedding" not in doc:
+                        try:
+                            doc["embedding"] = llm_client._embed(f"{doc['title']}\n{doc['content']}")
+                        except Exception as e:
+                            logging.warning(f"Failed to embed '{doc.get('title')}': {e}")
+                            scored.append((0.0, doc))
+                            continue
+                    score = cosine_similarity(question_embedding, doc["embedding"])
+                    scored.append((score, doc))
+
+                progress("Selecting most relevant documents...")
+                scored.sort(key=lambda x: x[0], reverse=True)
+                import os
+                top_k = int(os.getenv("MAX_SUMMARY", "5"))
+                relevant_docs = [doc for _, doc in scored[:top_k]]
+
+                progress("Generating answer...")
+                combined_text = "\n\n---\n\n".join(
+                    f"Document: {doc['title']}\n{doc['content']}" for doc in relevant_docs
+                )
+                answer = llm_client.rag_answer(combined_text, question)
+
+                return {
+                    "question": question,
+                    "summary": answer,
+                    "document_count": len(documents),
+                    "sources": [{"id": i, "title": doc["title"]} for i, doc in enumerate(relevant_docs)]
+                }
+
+            search_task = asyncio.create_task(asyncio.to_thread(answer_task))
+
+            # Yield progress messages while task is running
+            while not search_task.done():
+                while not progress_queue.empty():
+                    try:
+                        msg = progress_queue.get_nowait()
+                        logging.debug(f"Yielding progress: {msg}")
+                        yield f"data: {json.dumps(msg)}\n\n"
+                    except Exception as e:
+                        logging.exception("Error getting progress message")
+                        break
+                await asyncio.sleep(0.1)
+
+            # Drain any remaining progress messages
+            while not progress_queue.empty():
+                try:
+                    msg = progress_queue.get_nowait()
+                    logging.debug(f"Yielding final progress: {msg}")
+                    yield f"data: {json.dumps(msg)}\n\n"
+                except Exception as e:
+                    logging.exception("Error draining progress")
+                    break
+
+            # Get the result
+            try:
+                result = await search_task
+                logging.info(f"Search completed, yielding result")
+                yield f"data: {json.dumps({'type': 'result', 'data': result})}\n\n"
+            except Exception as e:
+                logging.exception("Error during answer generation")
+                yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+        except Exception as e:
+            logging.exception("Unexpected error in event generator")
+            yield f"data: {json.dumps({'type': 'error', 'message': 'An unexpected error occurred'})}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
 @app.post("/api/search", response_model=SearchResult)
 def search(request: SearchRequest):
     if not request.question.strip():
