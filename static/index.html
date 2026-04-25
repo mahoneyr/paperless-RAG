@@ -105,7 +105,10 @@
             <button onclick="searchDocuments()">Search Documents</button>
 
             <div id="results" class="results">
-                <strong>Found <span id="docCount">0</span> documents</strong>
+                <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;margin-bottom:8px;">
+                    <input type="checkbox" id="selectAll" checked onchange="toggleSelectAll(this.checked)">
+                    <strong>Found <span id="docCount">0</span> documents</strong>
+                </label>
                 <div id="docPreview"></div>
             </div>
         </div>
@@ -213,8 +216,10 @@
                 document.getElementById('docCount').textContent = indexedDocs.length;
                 const preview = document.getElementById('docPreview');
                 preview.innerHTML = indexedDocs.map(doc =>
-                    `<div class="doc-preview"><input type="checkbox" class="doc-checkbox" data-id="${doc.id}" checked><a href="${paperlessUrl}/documents/${doc.id}/details" target="_blank"><strong>${doc.title}</strong></a></div>`
+                    `<div class="doc-preview"><input type="checkbox" class="doc-checkbox" data-id="${doc.id}" checked onchange="syncSelectAll()"><a href="${paperlessUrl}/documents/${doc.id}/details" target="_blank"><strong>${doc.title}</strong></a></div>`
                 ).join('');
+                document.getElementById('selectAll').checked = true;
+                document.getElementById('selectAll').indeterminate = false;
 
                 document.getElementById('results').classList.add('show');
                 document.getElementById('questionSection').style.display = 'block';
@@ -273,6 +278,18 @@
             } finally {
                 btn.disabled = false;
             }
+        }
+
+        function toggleSelectAll(checked) {
+            document.querySelectorAll('.doc-checkbox').forEach(cb => cb.checked = checked);
+        }
+
+        function syncSelectAll() {
+            const all = document.querySelectorAll('.doc-checkbox');
+            const checked = document.querySelectorAll('.doc-checkbox:checked');
+            const master = document.getElementById('selectAll');
+            master.indeterminate = checked.length > 0 && checked.length < all.length;
+            master.checked = checked.length === all.length;
         }
 
         function showAnswerStatus(msg, type) {
