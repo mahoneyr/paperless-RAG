@@ -105,10 +105,18 @@
             <button onclick="searchDocuments()">Search Documents</button>
 
             <div id="results" class="results">
-                <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;margin-bottom:8px;">
-                    <input type="checkbox" id="selectAll" checked onchange="toggleSelectAll(this.checked)">
-                    <strong>Found <span id="docCount">0</span> documents</strong>
-                </label>
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                    <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
+                        <input type="checkbox" id="selectAll" checked onchange="toggleSelectAll(this.checked)">
+                        <strong>Found <span id="docCount">0</span> documents</strong>
+                    </label>
+                    <select id="sortOrder" onchange="renderDocList()" style="width:auto;margin:0;font-size:13px;padding:4px 8px;">
+                        <option value="date-desc">Date (newest)</option>
+                        <option value="date-asc">Date (oldest)</option>
+                        <option value="title-asc">Title (A–Z)</option>
+                        <option value="title-desc">Title (Z–A)</option>
+                    </select>
+                </div>
                 <div id="docPreview"></div>
             </div>
         </div>
@@ -214,12 +222,8 @@
                 indexedDocs = data.documents;
 
                 document.getElementById('docCount').textContent = indexedDocs.length;
-                const preview = document.getElementById('docPreview');
-                preview.innerHTML = indexedDocs.map(doc =>
-                    `<div class="doc-preview"><input type="checkbox" class="doc-checkbox" data-id="${doc.id}" checked onchange="syncSelectAll()"><a href="${paperlessUrl}/documents/${doc.id}/details" target="_blank"><strong>${doc.title}</strong></a></div>`
-                ).join('');
-                document.getElementById('selectAll').checked = true;
-                document.getElementById('selectAll').indeterminate = false;
+                document.getElementById('sortOrder').value = 'date-desc';
+                renderDocList();
 
                 document.getElementById('results').classList.add('show');
                 document.getElementById('questionSection').style.display = 'block';
@@ -278,6 +282,23 @@
             } finally {
                 btn.disabled = false;
             }
+        }
+
+        function renderDocList() {
+            const sort = document.getElementById('sortOrder').value;
+            const sorted = [...indexedDocs].sort((a, b) => {
+                if (sort === 'title-asc') return a.title.localeCompare(b.title);
+                if (sort === 'title-desc') return b.title.localeCompare(a.title);
+                const da = a.created_date || '';
+                const db = b.created_date || '';
+                return sort === 'date-asc' ? da.localeCompare(db) : db.localeCompare(da);
+            });
+            const preview = document.getElementById('docPreview');
+            preview.innerHTML = sorted.map(doc =>
+                `<div class="doc-preview"><input type="checkbox" class="doc-checkbox" data-id="${doc.id}" checked onchange="syncSelectAll()"><a href="${paperlessUrl}/documents/${doc.id}/details" target="_blank"><strong>${doc.title}</strong>${doc.created_date ? ` <span style="color:#999;font-weight:normal;">(${doc.created_date.slice(0,10)})</span>` : ''}</a></div>`
+            ).join('');
+            document.getElementById('selectAll').checked = true;
+            document.getElementById('selectAll').indeterminate = false;
         }
 
         function toggleSelectAll(checked) {

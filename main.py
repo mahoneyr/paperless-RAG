@@ -122,6 +122,7 @@ def search_index(request: dict):
                     "id": doc.id,
                     "title": doc.title,
                     "content": doc.content,
+                    "created_date": doc.created_date,
                 }
                 for doc in documents
             ]
