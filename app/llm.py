@@ -47,7 +47,7 @@ Answer:"""
 RAG_PROMPT = """\
 Answer this question using only the documents below. Do not summarize the documents. \
 Be direct and specific. When you use information from a document, include the document \
-title in parentheses at the end of the relevant sentence.
+title in italics in parentheses at the end of the relevant sentence, like this: (*Document Title*).
 
 Question: {question}
 
