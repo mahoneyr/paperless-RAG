@@ -25,17 +25,18 @@
         select:focus, input[type="text"]:focus, textarea:focus {
             outline: none; border-color: #0066cc; box-shadow: 0 0 0 3px rgba(0, 102, 204, 0.1);
         }
-        select { height: 280px; }
+        .filters-grid select { height: 280px; }
+        #sortOrder { height: auto !important; }
 
         @media (max-width: 768px) {
             .filters-grid { grid-template-columns: 1fr; gap: 20px; }
-            select { height: 200px; }
+            .filters-grid select { height: 200px; }
         }
 
         @media (max-width: 480px) {
             .container { padding: 20px; }
             .filters-grid { gap: 16px; }
-            select { height: 150px; }
+            .filters-grid select { height: 150px; }
             button { padding: 12px 20px; font-size: 13px; }
             h1 { font-size: 24px; margin-bottom: 24px; }
         }
