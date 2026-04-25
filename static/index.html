@@ -61,11 +61,6 @@
         .answer ul, .answer ol { margin: 10px 0 10px 20px; }
         .answer li { margin: 5px 0; }
         .answer.show { display: block; }
-
-        .progress-bar { display: none; margin: 15px 0; background: #e0e0e0; border-radius: 4px; height: 24px; overflow: hidden; }
-        .progress-bar.show { display: block; }
-        .progress-fill { background: linear-gradient(90deg, #0066cc, #0052a3); height: 100%; width: 0%; transition: width 0.3s; display: flex; align-items: center; justify-content: center; color: white; font-size: 12px; font-weight: 600; }
-        .progress-text { display: inline-block; min-width: 40px; }
     </style>
 </head>
 <body>
@@ -137,11 +132,6 @@
 
             <button id="askBtn" onclick="askQuestion()">Ask Question</button>
             <div id="answerStatus" class="status"></div>
-            <div id="progressBar" class="progress-bar">
-                <div class="progress-fill">
-                    <span class="progress-text">0%</span>
-                </div>
-            </div>
 
             <div id="answer" class="answer">
                 <strong>Answer:</strong>
@@ -272,7 +262,6 @@
             const btn = document.getElementById('askBtn');
             btn.disabled = true;
             showAnswerStatus('Ranking documents...', 'loading');
-            document.getElementById('progressBar').classList.add('show');
 
             try {
                 const res = await fetch('/api/search/answer-stream', {
@@ -302,7 +291,6 @@
                             try {
                                 const msg = JSON.parse(line.slice(6));
                                 if (msg.type === 'progress') {
-                                    updateProgress(msg.message);
                                     if (msg.message.includes('Generating answer')) {
                                         showAnswerStatus('Thinking...', 'loading');
                                     } else {
@@ -331,19 +319,6 @@
                 showAnswerStatus('Error: ' + e.message, 'error');
             } finally {
                 btn.disabled = false;
-                document.getElementById('progressBar').classList.remove('show');
-            }
-        }
-
-        function updateProgress(message) {
-            const match = message.match(/(\d+)\/(\d+)/);
-            if (match) {
-                const current = parseInt(match[1]);
-                const total = parseInt(match[2]);
-                const percent = Math.round((current / total) * 100);
-                const fill = document.querySelector('.progress-fill');
-                fill.style.width = percent + '%';
-                fill.querySelector('.progress-text').textContent = percent + '%';
             }
         }
 
