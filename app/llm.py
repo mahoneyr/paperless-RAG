@@ -78,8 +78,18 @@ class LLMClient:
         }
 
         start = time.time()
-        response = httpx.post(url, json=payload, timeout=300)
-        response.raise_for_status()
+        for attempt in range(4):
+            response = httpx.post(url, json=payload, timeout=300)
+            if response.status_code == 429:
+                wait = 2 ** attempt
+                logger.warning(f"Rate limited by Ollama (attempt {attempt + 1}), retrying in {wait}s")
+                time.sleep(wait)
+                continue
+            response.raise_for_status()
+            break
+        else:
+            response.raise_for_status()
+
         elapsed = time.time() - start
         result = response.json()["response"].strip()
         logger.info(f"LLM inference took {elapsed:.2f}s (model={self.model}, prompt_len={len(prompt)})")
