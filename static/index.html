@@ -303,7 +303,11 @@
                                 const msg = JSON.parse(line.slice(6));
                                 if (msg.type === 'progress') {
                                     updateProgress(msg.message);
-                                    showAnswerStatus(msg.message, 'loading');
+                                    if (msg.message.includes('Generating answer')) {
+                                        showAnswerStatus('Thinking...', 'loading');
+                                    } else {
+                                        showAnswerStatus(msg.message, 'loading');
+                                    }
                                 } else if (msg.type === 'result') {
                                     finalResult = msg.data;
                                 } else if (msg.type === 'error') {
