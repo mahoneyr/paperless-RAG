@@ -94,38 +94,76 @@ def get_filters():
 def search_index(request: dict):
     """Search Paperless with filters, return documents, and generate initial summary."""
     try:
-        document_type = request.get("document_type")
-        correspondent = request.get("correspondent")
-        tags = request.get("tags")
+        document_type = request.get("document_type") or []
+        correspondent = request.get("correspondent") or []
+        tags = request.get("tags") or []
         search_text = request.get("search_text")
 
-        # Build search query from filters with OR logic for metadata, AND logic for text
-        filters = []
+        # Build search queries with OR logic for metadata filters
+        # We use separate queries and combine results to implement OR logic
+        queries = []
 
-        # Document type: OR logic (type1 OR type2 OR ...)
-        if document_type:
-            type_filter = " OR ".join([f'type:"{t}"' for t in document_type])
-            filters.append(f"({type_filter})")
+        # Generate all combinations of metadata filters
+        if document_type or correspondent or tags:
+            # If no metadata filters, search without them
+            if document_type and not correspondent and not tags:
+                # OR across document types
+                for dt in document_type:
+                    q = f'type:"{dt}"'
+                    if search_text:
+                        q += f' {search_text}'
+                    queries.append(q)
+            elif correspondent and not document_type and not tags:
+                # OR across correspondents
+                for c in correspondent:
+                    q = f'correspondent:"{c}"'
+                    if search_text:
+                        q += f' {search_text}'
+                    queries.append(q)
+            elif tags and not document_type and not correspondent:
+                # OR across tags
+                for t in tags:
+                    q = f'tags:"{t}"'
+                    if search_text:
+                        q += f' {search_text}'
+                    queries.append(q)
+            else:
+                # Multiple metadata types: cartesian product with AND between types, OR within types
+                for dt in (document_type or [None]):
+                    for c in (correspondent or [None]):
+                        for tg in (tags or [None]):
+                            q_parts = []
+                            if dt:
+                                q_parts.append(f'type:"{dt}"')
+                            if c:
+                                q_parts.append(f'correspondent:"{c}"')
+                            if tg:
+                                q_parts.append(f'tags:"{tg}"')
+                            if search_text:
+                                q_parts.append(search_text)
+                            if q_parts:
+                                queries.append(" ".join(q_parts))
+        else:
+            # No filters, just text search
+            if search_text:
+                queries.append(search_text)
+            else:
+                queries.append("*")
 
-        # Correspondent: OR logic (corr1 OR corr2 OR ...)
-        if correspondent:
-            corr_filter = " OR ".join([f'correspondent:"{c}"' for c in correspondent])
-            filters.append(f"({corr_filter})")
+        logging.info(f"Searching Paperless with {len(queries)} queries")
 
-        # Tags: OR logic (tag1 OR tag2 OR ...)
-        if tags:
-            tags_filter = " OR ".join([f'tags:"{t}"' for t in tags])
-            filters.append(f"({tags_filter})")
+        # Execute all queries and combine results, removing duplicates
+        seen_ids = set()
+        all_documents = []
+        for q in queries:
+            logging.debug(f"Executing query: {q}")
+            docs = paperless_client.search(q)
+            for doc in docs:
+                if doc.id not in seen_ids:
+                    seen_ids.add(doc.id)
+                    all_documents.append(doc)
 
-        # Text search: AND logic (each term must be present)
-        if search_text:
-            filters.append(search_text)
-
-        query = " AND ".join(filters) if filters else "*"
-        logging.info(f"Searching Paperless with query: {query}")
-
-        documents = paperless_client.search(query)
-        logging.info(f"Found {len(documents)} documents")
+        logging.info(f"Found {len(all_documents)} unique documents")
 
         return {
             "documents": [
@@ -135,7 +173,7 @@ def search_index(request: dict):
                     "content": doc.content,
                     "created_date": doc.created_date,
                 }
-                for doc in documents
+                for doc in all_documents
             ]
         }
     except Exception:
