@@ -84,6 +84,8 @@ class LLMClient:
         start = time.time()
         for attempt in range(4):
             response = httpx.post(url, json=payload, timeout=300)
+            if response.status_code == 404:
+                raise ValueError(f"Ollama model '{self.model}' not found — check OLLAMA_MODEL in your .env")
             if response.status_code == 429:
                 wait = 2 ** attempt
                 logger.warning(f"Rate limited by Ollama (attempt {attempt + 1}), retrying in {wait}s")
@@ -104,6 +106,8 @@ class LLMClient:
         payload = {"model": self.embed_model, "input": text[:EMBED_MAX_CHARS]}
         with httpx.Client(timeout=30) as client:
             response = client.post(url, json=payload)
+            if response.status_code == 404:
+                raise ValueError(f"Ollama embed model '{self.embed_model}' not found — check OLLAMA_EMBED_MODEL in your .env")
             response.raise_for_status()
             return response.json()["embeddings"][0]
 
