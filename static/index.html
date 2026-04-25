@@ -53,6 +53,15 @@
         button:active { transform: translateY(0); }
         button:disabled { background: #ccc; cursor: not-allowed; transform: none; }
 
+        button[onclick="searchDocuments()"] {
+            width: 100%; padding: 18px 28px; font-size: 16px; font-weight: 700; margin-top: 8px;
+            background: linear-gradient(135deg, #0066cc 0%, #0052a3 100%);
+            box-shadow: 0 4px 12px rgba(0, 102, 204, 0.2);
+        }
+        button[onclick="searchDocuments()"]:hover {
+            box-shadow: 0 8px 20px rgba(0, 102, 204, 0.3);
+        }
+
         .button-group { display: flex; gap: 10px; margin-top: 20px; }
 
         .status { padding: 14px 16px; margin: 15px 0; border-radius: 6px; display: none; font-size: 14px; }
