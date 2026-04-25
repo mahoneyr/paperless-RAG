@@ -99,18 +99,29 @@ def search_index(request: dict):
         tags = request.get("tags")
         search_text = request.get("search_text")
 
-        # Build search query from filters
+        # Build search query from filters with OR logic for metadata, AND logic for text
         filters = []
+
+        # Document type: OR logic (type1 OR type2 OR ...)
         if document_type:
-            filters.append(f'type:"{document_type}"')
+            type_filter = " OR ".join([f'type:"{t}"' for t in document_type])
+            filters.append(f"({type_filter})")
+
+        # Correspondent: OR logic (corr1 OR corr2 OR ...)
         if correspondent:
-            filters.append(f'correspondent:"{correspondent}"')
+            corr_filter = " OR ".join([f'correspondent:"{c}"' for c in correspondent])
+            filters.append(f"({corr_filter})")
+
+        # Tags: OR logic (tag1 OR tag2 OR ...)
         if tags:
-            filters.append(f'tags:"{tags}"')
+            tags_filter = " OR ".join([f'tags:"{t}"' for t in tags])
+            filters.append(f"({tags_filter})")
+
+        # Text search: AND logic (each term must be present)
         if search_text:
             filters.append(search_text)
 
-        query = " ".join(filters) if filters else "*"
+        query = " AND ".join(filters) if filters else "*"
         logging.info(f"Searching Paperless with query: {query}")
 
         documents = paperless_client.search(query)

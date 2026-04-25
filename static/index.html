@@ -197,12 +197,12 @@
         }
 
         async function searchDocuments() {
-            const docType = document.getElementById('docType').value;
-            const correspondent = document.getElementById('correspondent').value;
-            const tags = document.getElementById('tags').value;
+            const docType = Array.from(document.getElementById('docType').selectedOptions).map(o => o.value);
+            const correspondent = Array.from(document.getElementById('correspondent').selectedOptions).map(o => o.value);
+            const tags = Array.from(document.getElementById('tags').selectedOptions).map(o => o.value);
             const textSearch = document.getElementById('textSearch').value;
 
-            if (!docType && !correspondent && !tags && !textSearch) {
+            if (docType.length === 0 && correspondent.length === 0 && tags.length === 0 && !textSearch) {
                 showStatus('Please select at least one filter', 'error');
                 return;
             }
@@ -214,9 +214,9 @@
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        document_type: docType || null,
-                        correspondent: correspondent || null,
-                        tags: tags || null,
+                        document_type: docType.length > 0 ? docType : null,
+                        correspondent: correspondent.length > 0 ? correspondent : null,
+                        tags: tags.length > 0 ? tags : null,
                         search_text: textSearch || null
                     })
                 });
