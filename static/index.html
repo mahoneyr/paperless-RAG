@@ -291,10 +291,10 @@
                             try {
                                 const msg = JSON.parse(line.slice(6));
                                 if (msg.type === 'progress') {
-                                    if (msg.message.includes('Generating answer')) {
-                                        showAnswerStatus('Thinking...', 'loading');
-                                    } else {
+                                    if (msg.message.includes('Analyzing')) {
                                         showAnswerStatus(msg.message, 'loading');
+                                    } else {
+                                        showAnswerStatus('Thinking...', 'loading');
                                     }
                                 } else if (msg.type === 'result') {
                                     finalResult = msg.data;
