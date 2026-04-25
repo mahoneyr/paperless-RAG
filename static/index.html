@@ -77,21 +77,21 @@
             <h2>Step 1: Search Documents</h2>
 
             <div class="filter-group">
-                <label>Document Type <button type="button" onclick="document.getElementById('docType').value=''; document.getElementById('docType').selectedIndex=0" style="margin-left: 10px; padding: 4px 8px; font-size: 12px; background: #666; color: white; border: 1px solid #555; cursor: pointer; border-radius: 3px;">Clear</button></label>
+                <label>Document Type <button type="button" onclick="clearSelect('docType')" style="margin-left: 10px; padding: 4px 8px; font-size: 12px; background: #666; color: white; border: 1px solid #555; cursor: pointer; border-radius: 3px;">Clear</button></label>
                 <select id="docType" multiple>
                     <option value="">Loading...</option>
                 </select>
             </div>
 
             <div class="filter-group">
-                <label>Correspondent <button type="button" onclick="document.getElementById('correspondent').value=''; document.getElementById('correspondent').selectedIndex=0" style="margin-left: 10px; padding: 4px 8px; font-size: 12px; background: #666; color: white; border: 1px solid #555; cursor: pointer; border-radius: 3px;">Clear</button></label>
+                <label>Correspondent <button type="button" onclick="clearSelect('correspondent')" style="margin-left: 10px; padding: 4px 8px; font-size: 12px; background: #666; color: white; border: 1px solid #555; cursor: pointer; border-radius: 3px;">Clear</button></label>
                 <select id="correspondent" multiple>
                     <option value="">Loading...</option>
                 </select>
             </div>
 
             <div class="filter-group">
-                <label>Tags <button type="button" onclick="document.getElementById('tags').value=''; document.getElementById('tags').selectedIndex=0" style="margin-left: 10px; padding: 4px 8px; font-size: 12px; background: #666; color: white; border: 1px solid #555; cursor: pointer; border-radius: 3px;">Clear</button></label>
+                <label>Tags <button type="button" onclick="clearSelect('tags')" style="margin-left: 10px; padding: 4px 8px; font-size: 12px; background: #666; color: white; border: 1px solid #555; cursor: pointer; border-radius: 3px;">Clear</button></label>
                 <select id="tags" multiple>
                     <option value="">Loading...</option>
                 </select>
@@ -143,6 +143,11 @@
     <script>
         let indexedDocs = null;
         let paperlessUrl = '';
+
+        function clearSelect(elementId) {
+            const select = document.getElementById(elementId);
+            Array.from(select.options).forEach(option => option.selected = false);
+        }
 
         // Cosine similarity function
         function cosineSimilarity(a, b) {
@@ -317,13 +322,14 @@
             const el = document.getElementById('answerStatus');
             el.textContent = msg;
             el.className = 'status ' + type;
+            if (type === 'success') setTimeout(() => el.className = 'status', 3000);
         }
 
         function showStatus(msg, type) {
             const el = document.getElementById('filterStatus');
             el.textContent = msg;
             el.className = 'status ' + type;
-            if (type === 'success') setTimeout(() => el.classList.remove('show'), 3000);
+            if (type === 'success') setTimeout(() => el.className = 'status', 3000);
         }
     </script>
 </body>
