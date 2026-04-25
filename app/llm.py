@@ -75,6 +75,7 @@ class LLMClient:
             "model": self.model,
             "prompt": prompt,
             "stream": False,
+            "options": {"num_ctx": int(os.getenv("OLLAMA_CTX", "131072"))},
         }
 
         start = time.time()
