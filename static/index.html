@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Paperless LLM Search</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: system-ui, -apple-system, sans-serif; background: #f5f5f5; padding: 20px; }
+        .container { max-width: 900px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+
+        h1 { margin-bottom: 30px; color: #333; }
+        h2 { margin-top: 25px; margin-bottom: 15px; color: #555; font-size: 18px; border-bottom: 2px solid #eee; padding-bottom: 8px; }
+
+        .section { margin-bottom: 25px; }
+        .filter-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 8px; color: #666; font-weight: 500; }
+
+        select, input[type="text"], textarea {
+            width: 100%; padding: 10px; margin-bottom: 10px; border: 1px solid #ddd;
+            border-radius: 4px; font-size: 14px; font-family: inherit;
+        }
+        select { height: 120px; }
+        input[type="checkbox"] { margin-right: 8px; cursor: pointer; }
+
+        .checkbox-group { display: flex; flex-direction: column; gap: 8px; max-height: 150px; overflow-y: auto; }
+        .checkbox-item { display: flex; align-items: center; }
+
+        button {
+            background: #0066cc; color: white; padding: 12px 24px; border: none;
+            border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: 600;
+            transition: background 0.2s;
+        }
+        button:hover { background: #0052a3; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+
+        .button-group { display: flex; gap: 10px; margin-top: 20px; }
+
+        .status { padding: 12px; margin: 15px 0; border-radius: 4px; display: none; }
+        .status.loading { display: block; background: #e3f2fd; color: #1976d2; border-left: 4px solid #1976d2; }
+        .status.success { display: block; background: #e8f5e9; color: #388e3c; border-left: 4px solid #388e3c; }
+        .status.error { display: block; background: #ffebee; color: #c62828; border-left: 4px solid #c62828; }
+
+        .results {
+            background: #f9f9f9; padding: 15px; border-radius: 4px; margin: 15px 0;
+            border: 1px solid #eee; display: none;
+        }
+        .results.show { display: block; }
+        #docPreview { max-height: 300px; overflow-y: auto; padding: 5px; }
+        .doc-preview { font-size: 13px; color: #666; margin: 8px 0; padding: 8px; background: white; border-left: 3px solid #0066cc; }
+
+        textarea { resize: vertical; min-height: 80px; }
+
+        .answer { background: #f0f8ff; padding: 15px; border-radius: 4px; margin: 15px 0; display: none; border-left: 4px solid #0066cc; }
+        .answer p { margin: 10px 0; line-height: 1.6; }
+        .answer strong { color: #0052a3; font-weight: 600; }
+        .answer em { color: #555; }
+        .answer ul, .answer ol { margin: 10px 0 10px 20px; }
+        .answer li { margin: 5px 0; }
+        .answer.show { display: block; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📄 Paperless LLM Search</h1>
+
+        <!-- Markdown renderer library -->
+        <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+        <div id="filterStatus" class="status"></div>
+
+        <!-- Search Stage -->
+        <div class="section">
+            <h2>Step 1: Search Documents</h2>
+
+            <div class="filter-group">
+                <label>Document Type <button type="button" onclick="document.getElementById('docType').value=''; document.getElementById('docType').selectedIndex=0" style="margin-left: 10px; padding: 4px 8px; font-size: 12px; background: #666; color: white; border: 1px solid #555; cursor: pointer; border-radius: 3px;">Clear</button></label>
+                <select id="docType" multiple>
+                    <option value="">Loading...</option>
+                </select>
+            </div>
+
+            <div class="filter-group">
+                <label>Correspondent <button type="button" onclick="document.getElementById('correspondent').value=''; document.getElementById('correspondent').selectedIndex=0" style="margin-left: 10px; padding: 4px 8px; font-size: 12px; background: #666; color: white; border: 1px solid #555; cursor: pointer; border-radius: 3px;">Clear</button></label>
+                <select id="correspondent" multiple>
+                    <option value="">Loading...</option>
+                </select>
+            </div>
+
+            <div class="filter-group">
+                <label>Tags <button type="button" onclick="document.getElementById('tags').value=''; document.getElementById('tags').selectedIndex=0" style="margin-left: 10px; padding: 4px 8px; font-size: 12px; background: #666; color: white; border: 1px solid #555; cursor: pointer; border-radius: 3px;">Clear</button></label>
+                <select id="tags" multiple>
+                    <option value="">Loading...</option>
+                </select>
+            </div>
+
+            <div class="filter-group">
+                <label>Text Search <button type="button" onclick="document.getElementById('textSearch').value=''" style="margin-left: 10px; padding: 4px 8px; font-size: 12px; background: #666; color: white; border: 1px solid #555; cursor: pointer; border-radius: 3px;">Clear</button></label>
+                <input type="text" id="textSearch" placeholder="Enter keywords...">
+            </div>
+
+            <button onclick="searchDocuments()">Search Documents</button>
+
+            <div id="results" class="results">
+                <strong>Found <span id="docCount">0</span> documents</strong>
+                <div id="docPreview"></div>
+            </div>
+        </div>
+
+        <!-- Question Stage -->
+        <div class="section" id="questionSection" style="display: none;">
+            <h2>Step 2: Ask a Question</h2>
+
+            <div class="filter-group">
+                <label>Question</label>
+                <input type="text" id="question" placeholder="Ask a question about the documents..." onkeypress="if(event.key==='Enter') askQuestion()">
+            </div>
+
+            <button id="askBtn" onclick="askQuestion()">Ask Question</button>
+            <div id="answerStatus" class="status"></div>
+
+            <div id="answer" class="answer">
+                <strong>Answer:</strong>
+                <p id="answerText"></p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let indexedDocs = null;
+
+        // Cosine similarity function
+        function cosineSimilarity(a, b) {
+            const dot = a.reduce((sum, x, i) => sum + x * b[i], 0);
+            const magA = Math.sqrt(a.reduce((sum, x) => sum + x * x, 0));
+            const magB = Math.sqrt(b.reduce((sum, x) => sum + x * x, 0));
+            if (magA === 0 || magB === 0) return 0;
+            return dot / (magA * magB);
+        }
+
+        // Rank documents by relevance to query embedding
+        function rankDocuments(docs, queryEmbedding, topK = 5) {
+            const scored = docs.map(doc => ({
+                doc,
+                score: cosineSimilarity(queryEmbedding, doc.embedding)
+            }));
+            scored.sort((a, b) => b.score - a.score);
+            return scored.slice(0, topK).map(s => s.doc);
+        }
+
+        // Load filter options on page load
+        window.addEventListener('load', loadFilters);
+
+        async function loadFilters() {
+            try {
+                const res = await fetch('/api/filters');
+                const data = await res.json();
+
+                populateSelect('docType', data.document_types);
+                populateSelect('correspondent', data.correspondents);
+                populateSelect('tags', data.tags);
+            } catch (e) {
+                showStatus('Error loading filters: ' + e.message, 'error');
+            }
+        }
+
+        function populateSelect(elementId, options) {
+            const select = document.getElementById(elementId);
+            select.innerHTML = '<option value="">-- Select --</option>';
+            options.forEach(opt => {
+                const option = document.createElement('option');
+                option.value = opt.id || opt;
+                option.textContent = opt.name || opt;
+                select.appendChild(option);
+            });
+        }
+
+        async function searchDocuments() {
+            const docType = document.getElementById('docType').value;
+            const correspondent = document.getElementById('correspondent').value;
+            const tags = document.getElementById('tags').value;
+            const textSearch = document.getElementById('textSearch').value;
+
+            if (!docType && !correspondent && !tags && !textSearch) {
+                showStatus('Please select at least one filter', 'error');
+                return;
+            }
+
+            showStatus('Searching Paperless...', 'loading');
+
+            try {
+                const res = await fetch('/api/search/index', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        document_type: docType || null,
+                        correspondent: correspondent || null,
+                        tags: tags || null,
+                        search_text: textSearch || null
+                    })
+                });
+
+                if (!res.ok) throw new Error('Search failed');
+
+                const data = await res.json();
+                indexedDocs = data.documents;
+
+                document.getElementById('docCount').textContent = indexedDocs.length;
+                const preview = document.getElementById('docPreview');
+                preview.innerHTML = indexedDocs.map(doc =>
+                    `<div class="doc-preview"><strong>${doc.title}</strong> (ID: ${doc.id})</div>`
+                ).join('');
+
+                document.getElementById('results').classList.add('show');
+                document.getElementById('questionSection').style.display = 'block';
+                showStatus(`Found ${indexedDocs.length} documents`, 'success');
+            } catch (e) {
+                showStatus('Error: ' + e.message, 'error');
+            }
+        }
+
+        async function askQuestion() {
+            if (!indexedDocs) {
+                showAnswerStatus('Please search documents first', 'error');
+                return;
+            }
+
+            const question = document.getElementById('question').value;
+            if (!question) {
+                showAnswerStatus('Please enter a question', 'error');
+                return;
+            }
+
+            const btn = document.getElementById('askBtn');
+            btn.disabled = true;
+            showAnswerStatus('Ranking documents...', 'loading');
+
+            try {
+                const res = await fetch('/api/search/answer', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        question: question,
+                        documents: indexedDocs
+                    })
+                });
+
+                if (!res.ok) throw new Error('Failed to get answer');
+
+                const data = await res.json();
+                showAnswerStatus(`Generating answer (using ${data.relevant_count} documents)...`, 'loading');
+
+                // Render markdown to HTML
+                document.getElementById('answerText').innerHTML = marked.parse(data.answer);
+                document.getElementById('answer').classList.add('show');
+                showAnswerStatus('Answer ready', 'success');
+            } catch (e) {
+                showAnswerStatus('Error: ' + e.message, 'error');
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        function showAnswerStatus(msg, type) {
+            const el = document.getElementById('answerStatus');
+            el.textContent = msg;
+            el.className = 'status ' + type;
+        }
+
+        function showStatus(msg, type) {
+            const el = document.getElementById('filterStatus');
+            el.textContent = msg;
+            el.className = 'status ' + type;
+            if (type === 'success') setTimeout(() => el.classList.remove('show'), 3000);
+        }
+    </script>
+</body>
+</html>
