@@ -41,8 +41,8 @@ A question-answering interface for [Paperless-NGX](https://docs.paperless-ngx.co
 
 #### 1. Clone the repository
 ```bash
-git clone https://github.com/mahoneyr/paperless-llm.git
-cd paperless-llm
+git clone https://github.com/mahoneyr/paperless-rag.git
+cd paperless-rag
 ```
 
 #### 2. Create and activate a virtual environment
