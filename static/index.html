@@ -238,8 +238,7 @@
                 const option = document.createElement('option');
                 option.value = model.name;
                 const sizeGB = (model.size / (1024 ** 3)).toFixed(2);
-                const sizeB = model.size.toLocaleString();
-                option.textContent = `${model.name} (${sizeGB} GB / ${sizeB} B)`;
+                option.textContent = `${model.name} (${sizeGB} GB)`;
                 select.appendChild(option);
             });
         }
