@@ -1,61 +1,62 @@
-# Paperless LLM Search
+# Paperless LLM RAG Q&A
 
-An LLM-powered search and question-answering interface for [Paperless-NGX](https://docs.paperless-ngx.com/) documents. Uses local LLMs via [Ollama](https://ollama.ai/) to intelligently search, rank, and synthesize answers from your document collection.
+A question-answering interface for [Paperless-NGX](https://docs.paperless-ngx.com/) documents using RAG (Retrieval Augmented Generation). Search and filter your documents, then ask questions and get synthesized answers powered by local or cloud LLMs via [Ollama](https://ollama.ai/).
 
 ## Features
 
-- **Intelligent Search** — Uses an LLM to convert natural language queries into optimized document searches
-- **Smart Ranking** — Ranks search results by relevance using embedding similarity
-- **Ask Questions** — Get synthesized answers from selected documents using an LLM
-- **Streaming Answers** — Real-time streaming response generation
-- **Web UI** — Clean, responsive interface for searching and asking questions
-- **Filter by Metadata** — Filter documents by type, correspondent, tags, and text search
-- **Local Processing** — All LLM operations run locally via Ollama (no external API calls)
+- **No Pre-Indexing Required** — Unlike other RAG applications, index and ask questions on-the-fly. Select documents dynamically and get answers in real-time without batch processing
+- **Document Filtering** — Filter documents by type, correspondent, tags, and text search
+- **Document Selection** — Choose which documents to use for Q&A from search results
+- **Smart Ranking** — Ranks selected documents by relevance using embedding similarity
+- **Ask Questions** — Get synthesized answers from your selected documents using an LLM
+- **Web UI** — Clean, responsive interface for searching, selecting, and asking questions
+- **Flexible Model Selection** — Use local models via Ollama for full privacy, or cloud models like Gemini for better quality (your choice)
 
-## Architecture
+## Workflow
 
-```
-User Query
-    ↓
-LLM (Ollama) — generates optimized search query
-    ↓
-Paperless-NGX — retrieves matching documents
-    ↓
-Embedding Model (Ollama) — ranks by relevance
-    ↓
-LLM (Ollama) — synthesizes answer from top results
-    ↓
-Streaming Response to UI
-```
+**Phase 1: Search & Filter**
+1. User selects filters: document type, correspondent, tags
+2. User optionally searches for text within documents to further narrow the list
+3. Paperless-NGX returns matching documents
+4. User reviews and selects which documents to use for Q&A
+
+**Phase 2: Q&A on Selected Documents**
+1. User asks a question
+2. Embedding Model (Ollama) ranks selected documents by relevance
+3. LLM (Ollama) synthesizes an answer from the ranked documents
+4. Answer returned to user
 
 ## Requirements
 
 - **Python 3.9+**
 - **Paperless-NGX** instance (accessible over network)
-- **Ollama** with LLM and embedding models
-  - Recommended: `gemini-3-flash-preview:cloud` for LLM, `nomic-embed-text` for embeddings
-  - Or: `mistral` + `nomic-embed-text` for fully local processing
+- **Ollama** server with LLM and embedding models
+  - **Recommended**: `llama3.1` for LLM, `embeddinggemma` for embeddings
+  - Other options: `mistral`, `gemini-3-flash-preview:cloud`, etc. (Ollama supports many models)
+  - Note: Some cloud models require external API calls; local models process everything on your machine
 
 ## Installation
 
-### 1. Clone the repository
+### Option 1: Local Setup
+
+#### 1. Clone the repository
 ```bash
-git clone https://github.com/yourusername/paperless-llm.git
+git clone https://github.com/mahoneyr/paperless-llm.git
 cd paperless-llm
 ```
 
-### 2. Create and activate a virtual environment
+#### 2. Create and activate a virtual environment
 ```bash
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 ```
 
-### 3. Install dependencies
+#### 3. Install dependencies
 ```bash
 pip install -r requirements.txt
 ```
 
-### 4. Configure environment
+#### 4. Configure environment
 Copy `.env.template` to `.env` and fill in your configuration:
 
 ```bash
@@ -71,8 +72,8 @@ PAPERLESS_PUBLIC_URL=http://your-paperless-host:8000  # Optional: external URL f
 
 # Ollama
 OLLAMA_URL=http://your-ollama-host:11434
-OLLAMA_MODEL=gemini-3-flash-preview:cloud
-OLLAMA_EMBED_MODEL=nomic-embed-text
+OLLAMA_MODEL=llama3.1
+OLLAMA_EMBED_MODEL=embeddinggemma
 
 # Optional settings
 MAX_RESULTS=1000           # Max documents to retrieve per search
@@ -88,12 +89,33 @@ MAX_SUMMARY=20             # Max documents to use for answer synthesis
 
 **Ollama Setup:**
 1. Install Ollama from https://ollama.ai/
-2. Pull required models:
+2. Pull the recommended models:
    ```bash
-   ollama pull gemini-3-flash-preview:cloud
-   ollama pull nomic-embed-text
+   ollama pull llama3.1
+   ollama pull embeddinggemma
    ```
 3. Start the Ollama server (usually runs on localhost:11434)
+
+### Option 2: Docker Deployment
+
+The repository includes a `Dockerfile` for containerized deployment:
+
+```bash
+docker build -t paperless-llm .
+docker run -p 8000:8000 \
+  -e PAPERLESS_URL=http://your-paperless-host:8000 \
+  -e PAPERLESS_TOKEN=your-token \
+  -e OLLAMA_URL=http://your-ollama-host:11434 \
+  -e OLLAMA_MODEL=llama3.1 \
+  -e OLLAMA_EMBED_MODEL=embeddinggemma \
+  paperless-llm
+```
+
+Or use `docker-compose.yml` for a complete stack (requires editing for your environment):
+
+```bash
+docker-compose up
+```
 
 ## Running the Server
 
@@ -103,7 +125,11 @@ python main.py
 
 The server starts on `http://localhost:8000`. Open it in your browser to access the web UI.
 
-## API Endpoints
+## Technical Details
+
+The sections below are for developers and integrators. Most users only need to open `http://localhost:8000` in a browser to get started.
+
+### API Endpoints
 
 ### Health Check
 ```
