@@ -84,6 +84,7 @@ def get_filters():
             "document_types": [{"id": dt, "name": dt} for dt in taxonomy.get("document_types", [])],
             "correspondents": [{"id": c, "name": c} for c in taxonomy.get("correspondents", [])],
             "tags": [{"id": t, "name": t} for t in taxonomy.get("tags", [])],
+            "models": llm_client.get_available_models(),
         }
     except Exception:
         logging.exception("Error fetching filters")
@@ -299,7 +300,8 @@ async def search_answer_stream(request: dict):
                 combined_text = "\n\n---\n\n".join(
                     f"Document: {doc['title']}\n{doc['content']}" for doc in relevant_docs
                 )
-                answer = llm_client.rag_answer(combined_text, question)
+                selected_model = request.get("model")
+                answer = llm_client.rag_answer(combined_text, question, model=selected_model)
 
                 return {
                     "question": question,

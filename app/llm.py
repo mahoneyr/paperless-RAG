@@ -72,10 +72,11 @@ class LLMClient:
         self.model = model
         self.embed_model = embed_model
 
-    def _generate(self, prompt: str) -> str:
+    def _generate(self, prompt: str, model: str = None) -> str:
         url = f"{self.base_url}/api/generate"
+        selected_model = model or self.model
         payload = {
-            "model": self.model,
+            "model": selected_model,
             "prompt": prompt,
             "stream": False,
             "options": {"num_ctx": int(os.getenv("OLLAMA_CTX", "131072"))},
@@ -85,7 +86,7 @@ class LLMClient:
         for attempt in range(4):
             response = httpx.post(url, json=payload, timeout=300)
             if response.status_code == 404:
-                raise ValueError(f"Ollama model '{self.model}' not found — check OLLAMA_MODEL in your .env")
+                raise ValueError(f"Ollama model '{selected_model}' not found")
             if response.status_code == 429:
                 wait = 2 ** attempt
                 logger.warning(f"Rate limited by Ollama (attempt {attempt + 1}), retrying in {wait}s")
@@ -98,7 +99,7 @@ class LLMClient:
 
         elapsed = time.time() - start
         result = response.json()["response"].strip()
-        logger.info(f"LLM inference took {elapsed:.2f}s (model={self.model}, prompt_len={len(prompt)})")
+        logger.info(f"LLM inference took {elapsed:.2f}s (model={selected_model}, prompt_len={len(prompt)})")
         return result
 
     def _embed(self, text: str) -> list[float]:
@@ -154,10 +155,10 @@ class LLMClient:
             question=question, doc_count=len(doc_summaries), summaries=formatted
         ))
 
-    def rag_answer(self, documents_text: str, question: str) -> str:
+    def rag_answer(self, documents_text: str, question: str, model: str = None) -> str:
         """Answer a question using RAG (Retrieval Augmented Generation)."""
         logger.info("Answering question with RAG")
-        return self._generate(RAG_PROMPT.format(question=question, documents=documents_text))
+        return self._generate(RAG_PROMPT.format(question=question, documents=documents_text), model=model)
 
     def ping(self) -> bool:
         try:
@@ -168,3 +169,22 @@ class LLMClient:
             return True
         except Exception as e:
             raise ConnectionError(str(e))
+
+    def get_available_models(self) -> list[dict]:
+        """Fetch available models from Ollama with size information."""
+        try:
+            url = f"{self.base_url}/api/tags"
+            with httpx.Client(timeout=10) as client:
+                response = client.get(url)
+                response.raise_for_status()
+                data = response.json()
+                models = []
+                for model in data.get("models", []):
+                    models.append({
+                        "name": model["name"],
+                        "size": model.get("size", 0),
+                    })
+                return sorted(models, key=lambda x: x["name"])
+        except Exception as e:
+            logger.error(f"Failed to fetch models from Ollama: {e}")
+            return []
