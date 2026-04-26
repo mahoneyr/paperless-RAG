@@ -165,6 +165,9 @@
             <div class="filter-group" style="max-width: 600px;">
                 <label>Ask a Question</label>
                 <input type="text" id="question" placeholder="What would you like to know..." onkeypress="if(event.key==='Enter') askQuestion()">
+                <div style="display: flex; gap: 40px; margin-top: 8px;">
+                    <button type="button" onclick="document.getElementById('question').value=''" style="padding: 8px 12px; font-size: 12px; background: #f5f5f5; color: #666; border: 1px solid #ddd; cursor: pointer; border-radius: 4px; font-weight: 500;">Clear</button>
+                </div>
             </div>
 
             <button id="askBtn" onclick="askQuestion()">Get Answer</button>
