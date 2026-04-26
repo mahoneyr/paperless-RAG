@@ -1,0 +1,194 @@
+# Paperless LLM Search
+
+An LLM-powered search and question-answering interface for [Paperless-NGX](https://docs.paperless-ngx.com/) documents. Uses local LLMs via [Ollama](https://ollama.ai/) to intelligently search, rank, and synthesize answers from your document collection.
+
+## Features
+
+- **Intelligent Search** — Uses an LLM to convert natural language queries into optimized document searches
+- **Smart Ranking** — Ranks search results by relevance using embedding similarity
+- **Ask Questions** — Get synthesized answers from selected documents using an LLM
+- **Streaming Answers** — Real-time streaming response generation
+- **Web UI** — Clean, responsive interface for searching and asking questions
+- **Filter by Metadata** — Filter documents by type, correspondent, tags, and text search
+- **Local Processing** — All LLM operations run locally via Ollama (no external API calls)
+
+## Architecture
+
+```
+User Query
+    ↓
+LLM (Ollama) — generates optimized search query
+    ↓
+Paperless-NGX — retrieves matching documents
+    ↓
+Embedding Model (Ollama) — ranks by relevance
+    ↓
+LLM (Ollama) — synthesizes answer from top results
+    ↓
+Streaming Response to UI
+```
+
+## Requirements
+
+- **Python 3.9+**
+- **Paperless-NGX** instance (accessible over network)
+- **Ollama** with LLM and embedding models
+  - Recommended: `gemini-3-flash-preview:cloud` for LLM, `nomic-embed-text` for embeddings
+  - Or: `mistral` + `nomic-embed-text` for fully local processing
+
+## Installation
+
+### 1. Clone the repository
+```bash
+git clone https://github.com/yourusername/paperless-llm.git
+cd paperless-llm
+```
+
+### 2. Create and activate a virtual environment
+```bash
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+```
+
+### 3. Install dependencies
+```bash
+pip install -r requirements.txt
+```
+
+### 4. Configure environment
+Copy `.env.template` to `.env` and fill in your configuration:
+
+```bash
+cp .env.template .env
+```
+
+Edit `.env`:
+```env
+# Paperless-NGX
+PAPERLESS_URL=http://your-paperless-host:8000
+PAPERLESS_TOKEN=your-api-token-here
+PAPERLESS_PUBLIC_URL=http://your-paperless-host:8000  # Optional: external URL for document links
+
+# Ollama
+OLLAMA_URL=http://your-ollama-host:11434
+OLLAMA_MODEL=gemini-3-flash-preview:cloud
+OLLAMA_EMBED_MODEL=nomic-embed-text
+
+# Optional settings
+MAX_RESULTS=1000           # Max documents to retrieve per search
+MAX_SUMMARY=20             # Max documents to use for answer synthesis
+```
+
+### Getting API credentials
+
+**Paperless-NGX Token:**
+1. Log in to your Paperless instance
+2. Go to Settings → API tokens
+3. Generate a new token and copy it to `PAPERLESS_TOKEN`
+
+**Ollama Setup:**
+1. Install Ollama from https://ollama.ai/
+2. Pull required models:
+   ```bash
+   ollama pull gemini-3-flash-preview:cloud
+   ollama pull nomic-embed-text
+   ```
+3. Start the Ollama server (usually runs on localhost:11434)
+
+## Running the Server
+
+```bash
+python main.py
+```
+
+The server starts on `http://localhost:8000`. Open it in your browser to access the web UI.
+
+## API Endpoints
+
+### Health Check
+```
+GET /api/health
+```
+Returns the status of Paperless and Ollama connections.
+
+### Get Filters
+```
+GET /api/filters
+```
+Returns available document types, correspondents, and tags for filtering.
+
+### Search Documents
+```
+POST /api/search/index
+Content-Type: application/json
+
+{
+  "document_type": ["Invoice", "Receipt"],
+  "correspondent": ["Vendor A"],
+  "tags": ["important"],
+  "search_text": "keywords"
+}
+```
+Returns indexed documents matching the filters.
+
+### Get Answer
+```
+POST /api/search/answer
+Content-Type: application/json
+
+{
+  "question": "What was the total amount spent?",
+  "documents": [...]  // Array of documents to analyze
+}
+```
+Returns a synthesized answer based on the selected documents.
+
+### Stream Answer
+```
+POST /api/search/answer-stream
+Content-Type: application/json
+
+{
+  "question": "What was the total amount spent?",
+  "documents": [...]
+}
+```
+Returns a streaming response of the answer using Server-Sent Events (SSE).
+
+## Development
+
+### Project Structure
+```
+paperless-llm/
+├── main.py                 # FastAPI server and routes
+├── app/
+│   ├── paperless.py       # Paperless-NGX client
+│   ├── llm.py             # Ollama LLM and embedding client
+│   ├── orchestrator.py     # Search and answer synthesis logic
+│   ├── filters.py         # Filter helper functions
+│   └── models.py          # Pydantic models
+├── static/
+│   └── index.html         # Web UI
+├── requirements.txt       # Python dependencies
+└── .env.template          # Environment template
+```
+
+### Adding a new LLM model
+
+Edit `.env` and set `OLLAMA_MODEL` to your model name, then restart the server.
+
+## Troubleshooting
+
+**"Could not fetch filters"** — Check that Paperless is running and accessible at `PAPERLESS_URL`.
+
+**"Connection refused to Ollama"** — Ensure Ollama is running and `OLLAMA_URL` is correct. Models may take time to load on first use.
+
+**Slow responses** — Larger documents and models take longer. Adjust `MAX_SUMMARY` to use fewer documents, or use a faster model.
+
+## License
+
+MIT License — see LICENSE file for details.
+
+## Contributing
+
+Contributions are welcome! Feel free to open issues and pull requests.
