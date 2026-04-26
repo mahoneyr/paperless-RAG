@@ -63,9 +63,6 @@
             box-shadow: 0 8px 20px rgba(0, 102, 204, 0.3);
         }
 
-        #askBtn {
-            margin-top: 8px;
-        }
 
         .button-group { display: flex; gap: 10px; margin-top: 20px; }
 
@@ -176,7 +173,10 @@
                 </div>
             </div>
 
-            <button id="askBtn" onclick="askQuestion()">Get Answer</button>
+            <div style="display: flex; gap: 12px; max-width: 600px; align-items: flex-start; margin-top: 10px;">
+                <button id="askBtn" onclick="askQuestion()" style="height: 46px; white-space: nowrap; flex-shrink: 0;">Get Answer</button>
+                <button id="summarizeBtn" onclick="summarizeDocuments()" style="height: 46px; white-space: nowrap; flex-shrink: 0; margin-left: auto; margin-right: 60px; background: linear-gradient(135deg, #00a854 0%, #006d3d 100%); color: white; padding: 14px 28px; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 600; transition: transform 0.2s, box-shadow 0.2s;">Summarize Documents</button>
+            </div>
             <div id="answerStatus" class="status"></div>
 
             <div id="answer" class="answer">
@@ -375,6 +375,82 @@
                     showAnswerStatus('Answer ready', 'success');
                 } else {
                     showAnswerStatus('No answer received', 'error');
+                }
+            } catch (e) {
+                showAnswerStatus('Error: ' + e.message, 'error');
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        async function summarizeDocuments() {
+            if (!indexedDocs) {
+                showAnswerStatus('Please search documents first', 'error');
+                return;
+            }
+
+            const checkedIds = new Set(
+                [...document.querySelectorAll('.doc-checkbox:checked')].map(cb => parseInt(cb.dataset.id))
+            );
+            const selectedDocs = indexedDocs.filter(doc => checkedIds.has(doc.id));
+            if (selectedDocs.length === 0) {
+                showAnswerStatus('Please select at least one document', 'error');
+                return;
+            }
+
+            const btn = document.getElementById('summarizeBtn');
+            btn.disabled = true;
+            showAnswerStatus('Summarizing documents...', 'loading');
+
+            try {
+                const selectedModel = document.getElementById('selectedModel').value;
+                const res = await fetch('/api/search/answer-stream', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        question: 'Provide a comprehensive summary of these documents.',
+                        documents: selectedDocs,
+                        model: selectedModel || null
+                    })
+                });
+
+                if (!res.ok) throw new Error('Failed to summarize documents');
+
+                const reader = res.body.getReader();
+                const decoder = new TextDecoder();
+                let finalResult = null;
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    const chunk = decoder.decode(value);
+                    const lines = chunk.split('\n');
+
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            try {
+                                const msg = JSON.parse(line.slice(6));
+                                if (msg.type === 'progress') {
+                                    showAnswerStatus(msg.message, 'loading');
+                                } else if (msg.type === 'result') {
+                                    finalResult = msg.data;
+                                } else if (msg.type === 'error') {
+                                    showAnswerStatus('Error: ' + msg.message, 'error');
+                                }
+                            } catch (e) {
+                                // Skip invalid JSON
+                            }
+                        }
+                    }
+                }
+
+                if (finalResult && finalResult.summary) {
+                    document.getElementById('answerText').innerHTML = marked.parse(finalResult.summary);
+                    document.getElementById('answer').classList.add('show');
+                    showAnswerStatus('Summary ready', 'success');
+                } else {
+                    showAnswerStatus('No summary received', 'error');
                 }
             } catch (e) {
                 showAnswerStatus('Error: ' + e.message, 'error');
