@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.llm import LLMClient
-from app.models import HealthStatus, SearchRequest, SearchResult
+from app.models import HealthStatus, SearchRequest, SearchResult, AnswerRequest, SearchIndexRequest
 from app.orchestrator import SearchAndSummarize
 from app.paperless import PaperlessClient
 
@@ -92,13 +92,13 @@ def get_filters():
 
 
 @app.post("/api/search/index")
-def search_index(request: dict):
+def search_index(request: SearchIndexRequest):
     """Search Paperless with filters, return documents, and generate initial summary."""
     try:
-        document_type = request.get("document_type") or []
-        correspondent = request.get("correspondent") or []
-        tags = request.get("tags") or []
-        search_text = request.get("search_text")
+        document_type = request.document_type or []
+        correspondent = request.correspondent or []
+        tags = request.tags or []
+        search_text = request.search_text
 
         # Build search queries with OR logic for metadata filters
         # We use separate queries and combine results to implement OR logic
@@ -183,11 +183,11 @@ def search_index(request: dict):
 
 
 @app.post("/api/search/answer")
-def search_answer(request: dict):
+def search_answer(request: AnswerRequest):
     """Answer a question using RAG on indexed documents."""
     try:
-        question = request.get("question")
-        documents = request.get("documents", [])
+        question = request.question
+        documents = request.documents
 
         if not question:
             raise HTTPException(status_code=400, detail="Question is required")
@@ -232,7 +232,7 @@ def search_answer(request: dict):
         combined_text = "\n\n---\n\n".join(
             f"Document: {doc['title']}\n{doc['content']}" for doc in relevant_docs
         )
-        selected_model = request.get("model")
+        selected_model = request.model
         answer = llm_client.rag_answer(combined_text, question, model=selected_model)
 
         return {
@@ -247,11 +247,11 @@ def search_answer(request: dict):
 
 
 @app.post("/api/search/answer-stream")
-async def search_answer_stream(request: dict):
+async def search_answer_stream(request: AnswerRequest):
     """Stream progress while answering a question about selected documents."""
-    if not request.get("question"):
+    if not request.question:
         raise HTTPException(status_code=400, detail="Question is required")
-    if not request.get("documents"):
+    if not request.documents:
         raise HTTPException(status_code=400, detail="No documents provided")
 
     progress_queue: queue.SimpleQueue = queue.SimpleQueue()
@@ -261,8 +261,8 @@ async def search_answer_stream(request: dict):
 
     async def event_generator():
         try:
-            question = request.get("question")
-            documents = request.get("documents", [])
+            question = request.question
+            documents = request.documents
 
             def answer_task():
                 import math
@@ -301,7 +301,7 @@ async def search_answer_stream(request: dict):
                 combined_text = "\n\n---\n\n".join(
                     f"Document: {doc['title']}\n{doc['content']}" for doc in relevant_docs
                 )
-                selected_model = request.get("model")
+                selected_model = request.model
                 answer = llm_client.rag_answer(combined_text, question, model=selected_model)
 
                 return {

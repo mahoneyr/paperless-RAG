@@ -30,6 +30,19 @@ class SearchResult(BaseModel):
     mode: str
 
 
+class AnswerRequest(BaseModel):
+    question: str
+    documents: list[dict]
+    model: Optional[str] = None
+
+
+class SearchIndexRequest(BaseModel):
+    document_type: Optional[list[str]] = None
+    correspondent: Optional[list[str]] = None
+    tags: Optional[list[str]] = None
+    search_text: Optional[str] = None
+
+
 class HealthStatus(BaseModel):
     paperless: bool
     ollama: bool
