@@ -45,8 +45,8 @@ class SearchAndSummarize:
                     f"{len(self.taxonomy['correspondents'])} correspondents, "
                     f"{len(self.taxonomy['document_types'])} document types")
 
-    def process(self, question: str, mode: str = "fast", progress: Progress = None) -> SearchResult:
-        logger.info(f"Processing question: {question!r} (mode={mode})")
+    def process(self, question: str, mode: str = "fast", progress: Progress = None, model: str = None) -> SearchResult:
+        logger.info(f"Processing question: {question!r} (mode={mode}, model={model})")
 
         _progress(progress, "Building search query...")
         keywords = extract_keywords(question)
@@ -73,9 +73,9 @@ class SearchAndSummarize:
         _progress(progress, f"Found {len(documents)} documents")
 
         if mode == "thinking":
-            summary, used_docs = self._thinking(question, documents, progress)
+            summary, used_docs = self._thinking(question, documents, progress, model)
         else:
-            summary, used_docs = self._fast(question, documents, progress)
+            summary, used_docs = self._fast(question, documents, progress, model)
 
         return SearchResult(
             question=question,
@@ -86,7 +86,7 @@ class SearchAndSummarize:
             mode=mode,
         )
 
-    def _fast(self, question: str, documents, progress: Progress) -> tuple[str, list]:
+    def _fast(self, question: str, documents, progress: Progress, model: str = None) -> tuple[str, list]:
         _progress(progress, f"Ranking {len(documents)} documents by relevance...")
         top_docs = self.llm.rank_documents(documents, question)
         _progress(progress, f"Summarizing top {len(top_docs)} documents...")
@@ -94,15 +94,15 @@ class SearchAndSummarize:
             f"Document: {doc.title} (ID: {doc.id})\n{doc.content}"
             for doc in top_docs
         )
-        return self.llm.summarize(combined, question), top_docs
+        return self.llm.summarize(combined, question, model=model), top_docs
 
-    def _thinking(self, question: str, documents, progress: Progress) -> tuple[str, list]:
+    def _thinking(self, question: str, documents, progress: Progress, model: str = None) -> tuple[str, list]:
         total = len(documents)
         doc_summaries: list[tuple[str, str]] = [None] * total
 
         def summarize_one(index: int, doc):
             _progress(progress, f"Analyzing {index + 1}/{total}: {doc.title}")
-            summary = self.llm.summarize_document(doc.title, doc.content, question)
+            summary = self.llm.summarize_document(doc.title, doc.content, question, model=model)
             _progress(progress, f"Done {index + 1}/{total}: {doc.title}")
             return index, doc.title, summary
 
@@ -113,7 +113,7 @@ class SearchAndSummarize:
                 doc_summaries[index] = (title, summary)
 
         _progress(progress, "Synthesizing final answer...")
-        return self.llm.synthesize(doc_summaries, question), documents
+        return self.llm.synthesize(doc_summaries, question, model=model), documents
 
 
 def _progress(callback: Progress, message: str):

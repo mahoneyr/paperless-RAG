@@ -13,6 +13,7 @@ class Document(BaseModel):
 class SearchRequest(BaseModel):
     question: str
     mode: Literal["fast", "thinking"] = "fast"
+    model: Optional[str] = None
 
 
 class SourceDoc(BaseModel):

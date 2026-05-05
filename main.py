@@ -232,7 +232,8 @@ def search_answer(request: dict):
         combined_text = "\n\n---\n\n".join(
             f"Document: {doc['title']}\n{doc['content']}" for doc in relevant_docs
         )
-        answer = llm_client.rag_answer(combined_text, question)
+        selected_model = request.get("model")
+        answer = llm_client.rag_answer(combined_text, question, model=selected_model)
 
         return {
             "question": question,
@@ -354,7 +355,7 @@ def search(request: SearchRequest):
     if not request.question.strip():
         raise HTTPException(status_code=400, detail="Question cannot be empty")
     try:
-        return orchestrator.process(request.question, request.mode)
+        return orchestrator.process(request.question, request.mode, model=request.model)
     except ConnectionError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception:
@@ -376,7 +377,7 @@ async def search_stream(request: SearchRequest):
         try:
             logging.info(f"Starting stream for question: {request.question!r}")
             search_task = asyncio.create_task(
-                asyncio.to_thread(orchestrator.process, request.question, request.mode, progress)
+                asyncio.to_thread(orchestrator.process, request.question, request.mode, progress, model=request.model)
             )
             logging.info("Search task created")
 
