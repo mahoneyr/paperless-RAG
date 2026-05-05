@@ -85,7 +85,12 @@ class LLMClient:
         start = time.time()
         for attempt in range(4):
             response = httpx.post(url, json=payload, timeout=300)
-            if response.status_code in (403, 404):
+            if response.status_code == 403:
+                raise ValueError(
+                    f"Access denied for model '{selected_model}'. "
+                    f"This may be a paid cloud model. Check your Ollama subscription or use a free model."
+                )
+            if response.status_code == 404:
                 raise ValueError(f"Ollama model '{selected_model}' not found")
             if response.status_code == 429:
                 wait = 2 ** attempt
