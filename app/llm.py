@@ -130,30 +130,30 @@ class LLMClient:
         logger.info(f"Top {len(top)} docs: {[d.title for d in top]}")
         return top
 
-    def summarize(self, documents_text: str, question: str) -> str:
+    def summarize(self, documents_text: str, question: str, model: str = None) -> str:
         logger.info("Summarizing documents (single-pass)")
         truncated = documents_text[:MAX_CHARS]
         if len(documents_text) > MAX_CHARS:
             logger.warning(f"Document text truncated from {len(documents_text)} to {MAX_CHARS} chars")
             truncated += "\n\n[Note: document text was truncated due to length]"
-        return self._generate(SUMMARIZE_PROMPT.format(question=question, documents=truncated))
+        return self._generate(SUMMARIZE_PROMPT.format(question=question, documents=truncated), model=model)
 
-    def summarize_document(self, title: str, content: str, question: str) -> str:
+    def summarize_document(self, title: str, content: str, question: str, model: str = None) -> str:
         truncated = content[:DOC_MAX_CHARS]
         if len(content) > DOC_MAX_CHARS:
             logger.warning(f"Document '{title}' truncated from {len(content)} to {DOC_MAX_CHARS} chars")
         return self._generate(DOC_SUMMARIZE_PROMPT.format(
             question=question, title=title, content=truncated
-        ))
+        ), model=model)
 
-    def synthesize(self, doc_summaries: list[tuple[str, str]], question: str) -> str:
+    def synthesize(self, doc_summaries: list[tuple[str, str]], question: str, model: str = None) -> str:
         logger.info(f"Synthesizing {len(doc_summaries)} document summaries")
         formatted = "\n\n---\n\n".join(
             f"From '{title}':\n{summary}" for title, summary in doc_summaries
         )
         return self._generate(SYNTHESIZE_PROMPT.format(
             question=question, doc_count=len(doc_summaries), summaries=formatted
-        ))
+        ), model=model)
 
     def rag_answer(self, documents_text: str, question: str, model: str = None) -> str:
         """Answer a question using RAG (Retrieval Augmented Generation)."""
