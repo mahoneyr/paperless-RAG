@@ -1,7 +1,7 @@
 services:
   paperless-llm:
     build: .
-    image: paperless-rag:0.6
+    image: paperless-rag:0.7
     ports:
       - "8000:8000"
     env_file:

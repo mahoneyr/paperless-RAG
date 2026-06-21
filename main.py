@@ -1,11 +1,12 @@
 import logging
 import os
 import pathlib
+import secrets
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import StreamingResponse, FileResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.filters import build_index_queries
@@ -26,6 +27,14 @@ logging.basicConfig(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    api_key = os.getenv("API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError(
+            "API_KEY environment variable is required — authentication is mandatory. "
+            "Set API_KEY in your environment (e.g. the Portainer stack) and redeploy."
+        )
+    app.state.api_key = api_key
+
     paperless_url = os.environ["PAPERLESS_URL"]
     paperless_token = os.environ["PAPERLESS_TOKEN"]
     ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
@@ -44,6 +53,17 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Paperless LLM Search", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def require_api_key(request: Request, call_next):
+    """Gate all /api/* routes behind the X-API-Key header. Static files and the
+    UI shell are served freely; the document data is what is protected."""
+    if request.url.path.startswith("/api/"):
+        provided = request.headers.get("X-API-Key", "")
+        if not secrets.compare_digest(provided, app.state.api_key):
+            return JSONResponse(status_code=401, content={"detail": "Invalid or missing API key"})
+    return await call_next(request)
 
 
 @app.get("/api/health", response_model=HealthStatus)
