@@ -238,6 +238,22 @@
     </style>
 </head>
 <body>
+    <!-- API key unlock modal -->
+    <div id="keyModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:1000; align-items:center; justify-content:center;">
+        <div style="background:#fff; padding:28px 32px; border-radius:10px; max-width:420px; width:90%; box-shadow:0 10px 40px rgba(0,0,0,0.3);">
+            <h2 style="margin:0 0 8px; font-size:20px; color:#0066cc;">🔒 API Key Required</h2>
+            <p style="margin:0 0 16px; color:#555; font-size:14px; line-height:1.5;">Enter your API key to access your documents.</p>
+            <input type="password" id="apiKeyInput" placeholder="API key" autocomplete="current-password"
+                   style="width:100%; padding:12px; border:2px solid #e0e0e0; border-radius:6px; font-size:14px; box-sizing:border-box;"
+                   onkeypress="if(event.key==='Enter') submitApiKey()">
+            <div id="keyModalError" style="display:none; color:#cc0000; font-size:13px; margin-top:10px;"></div>
+            <button onclick="submitApiKey()" style="margin-top:16px; width:100%;">Unlock</button>
+        </div>
+    </div>
+
+    <button onclick="changeApiKey()" title="Change API key"
+            style="position:fixed; top:16px; right:16px; z-index:900; padding:8px 12px; font-size:13px;">🔑 Change key</button>
+
     <div class="container">
         <h1>📄 Paperless LLM Search</h1>
 
@@ -502,13 +518,67 @@
             return scored.slice(0, topK).map(s => s.doc);
         }
 
-        // Load filter options on page load
-        window.addEventListener('load', loadFilters);
+        // --- API key authentication ---
+        const API_KEY_STORAGE = 'paperlessRagApiKey';
+
+        function getApiKey() {
+            return localStorage.getItem(API_KEY_STORAGE) || '';
+        }
+
+        function showKeyModal(message) {
+            const err = document.getElementById('keyModalError');
+            if (message) {
+                err.textContent = message;
+                err.style.display = 'block';
+            } else {
+                err.style.display = 'none';
+            }
+            document.getElementById('keyModal').style.display = 'flex';
+            document.getElementById('apiKeyInput').focus();
+        }
+
+        function submitApiKey() {
+            const value = document.getElementById('apiKeyInput').value.trim();
+            if (!value) {
+                showKeyModal('Please enter a key.');
+                return;
+            }
+            localStorage.setItem(API_KEY_STORAGE, value);
+            document.getElementById('apiKeyInput').value = '';
+            document.getElementById('keyModal').style.display = 'none';
+            loadFilters();
+        }
+
+        function changeApiKey() {
+            localStorage.removeItem(API_KEY_STORAGE);
+            showKeyModal();
+        }
+
+        // fetch wrapper that attaches the API key and handles auth failures
+        async function apiFetch(url, options = {}) {
+            const headers = Object.assign({}, options.headers || {}, { 'X-API-Key': getApiKey() });
+            const res = await fetch(url, Object.assign({}, options, { headers }));
+            if (res.status === 401) {
+                localStorage.removeItem(API_KEY_STORAGE);
+                showKeyModal('Invalid or missing API key — please re-enter.');
+                throw new Error('Unauthorized');
+            }
+            return res;
+        }
+
+        // Gate the app on page load: prompt for a key, or load filters if we have one
+        window.addEventListener('load', () => {
+            if (getApiKey()) {
+                loadFilters();
+            } else {
+                showKeyModal();
+            }
+        });
 
         async function loadFilters() {
             try {
                 initTagSelects();
-                const res = await fetch('/api/filters');
+                const res = await apiFetch('/api/filters');
                 const data = await res.json();
 
                 paperlessUrl = data.paperless_url || '';
@@ -566,7 +636,7 @@
             showStatus('Searching Paperless...', 'loading');
 
             try {
-                const res = await fetch('/api/search/index', {
+                const res = await apiFetch('/api/search/index', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -621,7 +691,7 @@
 
             try {
                 const selectedModel = document.getElementById('selectedModel').value;
-                const res = await fetch('/api/search/answer-stream', {
+                const res = await apiFetch('/api/search/answer-stream', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -701,7 +771,7 @@
 
             try {
                 const selectedModel = document.getElementById('selectedModel').value;
-                const res = await fetch('/api/search/answer-stream', {
+                const res = await apiFetch('/api/search/answer-stream', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({

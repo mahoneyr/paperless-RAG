@@ -65,6 +65,9 @@ cp .env.template .env
 
 Edit `.env`:
 ```env
+# Authentication (required) — clients send this as the X-API-Key header
+API_KEY=a-long-random-string   # generate: python -c "import secrets; print(secrets.token_urlsafe(32))"
+
 # Paperless-NGX
 PAPERLESS_URL=http://your-paperless-host:8000
 PAPERLESS_TOKEN=your-api-token-here
@@ -103,6 +106,7 @@ The repository includes a `Dockerfile` for containerized deployment:
 ```bash
 docker build -t paperless-llm .
 docker run -p 8000:8000 \
+  -e API_KEY=your-long-random-key \
   -e PAPERLESS_URL=http://your-paperless-host:8000 \
   -e PAPERLESS_TOKEN=your-token \
   -e OLLAMA_URL=http://your-ollama-host:11434 \
@@ -128,6 +132,23 @@ The server starts on `http://localhost:8000`. Open it in your browser to access 
 ## Technical Details
 
 The sections below are for developers and integrators. Most users only need to open `http://localhost:8000` in a browser to get started.
+
+### Authentication
+
+All `/api/*` endpoints require an API key, supplied via the `X-API-Key` header.
+The key is set with the `API_KEY` environment variable — **the server refuses to
+start if it is unset** (authentication is mandatory).
+
+- **Browser users**: the web UI prompts for the key on first load and stores it in
+  the browser's `localStorage`, sending it automatically on every request. Use the
+  **🔑 Change key** button (top-right) to switch or clear it.
+- **API clients**: send the header explicitly, e.g.
+  ```bash
+  curl -H "X-API-Key: your-key" http://localhost:8000/api/filters
+  ```
+
+Requests with a missing or incorrect key receive `401 Unauthorized`. Static assets
+(the UI itself) are served without a key; only the document data is protected.
 
 ### API Endpoints
 
