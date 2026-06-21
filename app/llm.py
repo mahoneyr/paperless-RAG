@@ -117,11 +117,14 @@ class LLMClient:
             response.raise_for_status()
             return response.json()["embeddings"][0]
 
-    def rank_documents(self, documents, question: str):
+    def rank_documents(self, documents, question: str, progress=None):
         logger.info(f"Embedding and ranking {len(documents)} documents")
         question_vec = self._embed(question)
         scored = []
-        for doc in documents:
+        total = len(documents)
+        for idx, doc in enumerate(documents, 1):
+            if progress:
+                progress(f"Analyzing {idx}/{total}: {doc.title}")
             try:
                 doc_vec = self._embed(f"{doc.title}\n{doc.content}")
                 score = _cosine_similarity(question_vec, doc_vec)
