@@ -3,6 +3,50 @@ from datetime import date
 from typing import Optional
 
 
+def build_index_queries(
+    document_type: list[str],
+    correspondent: list[str],
+    tags: list[str],
+    search_text: Optional[str],
+) -> list[str]:
+    """Build Paperless search queries for the index endpoint.
+
+    OR within a single metadata type (separate queries combined by the caller),
+    AND across types (cartesian product). Optional free-text is appended to each.
+    """
+    def with_text(query: str) -> str:
+        return f"{query} {search_text}".strip() if search_text else query
+
+    if not (document_type or correspondent or tags):
+        return [search_text] if search_text else ["*"]
+
+    # Single metadata type: one query per value (OR semantics).
+    if document_type and not correspondent and not tags:
+        return [with_text(f'type:"{dt}"') for dt in document_type]
+    if correspondent and not document_type and not tags:
+        return [with_text(f'correspondent:"{c}"') for c in correspondent]
+    if tags and not document_type and not correspondent:
+        return [with_text(f'tags:"{t}"') for t in tags]
+
+    # Multiple metadata types: cartesian product (AND across types, OR within).
+    queries = []
+    for dt in (document_type or [None]):
+        for c in (correspondent or [None]):
+            for tg in (tags or [None]):
+                parts = []
+                if dt:
+                    parts.append(f'type:"{dt}"')
+                if c:
+                    parts.append(f'correspondent:"{c}"')
+                if tg:
+                    parts.append(f'tags:"{tg}"')
+                if search_text:
+                    parts.append(search_text)
+                if parts:
+                    queries.append(" ".join(parts))
+    return queries
+
+
 def extract_filters(question: str, taxonomy: dict) -> dict:
     q = question.lower()
     filters = {}

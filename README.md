@@ -76,8 +76,8 @@ OLLAMA_MODEL=llama3.1
 OLLAMA_EMBED_MODEL=embeddinggemma
 
 # Optional settings
-MAX_RESULTS=1000           # Max documents to retrieve per search
-MAX_SUMMARY=20             # Max documents to use for answer synthesis
+MAX_RESULTS=20             # Max documents to retrieve per search
+MAX_SUMMARY=5              # Max documents to use for answer synthesis
 ```
 
 ### Getting API credentials

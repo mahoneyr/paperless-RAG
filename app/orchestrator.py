@@ -96,6 +96,16 @@ class SearchAndSummarize:
         )
         return self.llm.summarize(combined, question, model=model), top_docs
 
+    def answer(self, question: str, documents, model: str = None, progress: Progress = None) -> tuple[str, list]:
+        """Rank pre-supplied documents by relevance and answer the question with RAG."""
+        _progress(progress, f"Ranking {len(documents)} documents by relevance...")
+        top_docs = self.llm.rank_documents(documents, question, progress=progress)
+        _progress(progress, "Generating answer...")
+        combined = "\n\n---\n\n".join(
+            f"Document: {doc.title}\n{doc.content}" for doc in top_docs
+        )
+        return self.llm.rag_answer(combined, question, model=model), top_docs
+
     def _thinking(self, question: str, documents, progress: Progress, model: str = None) -> tuple[str, list]:
         total = len(documents)
         doc_summaries: list[tuple[str, str]] = [None] * total
