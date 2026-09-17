@@ -32,7 +32,7 @@ class SearchResult(BaseModel):
 
 class AnswerRequest(BaseModel):
     question: str
-    documents: list[dict]
+    documents: list[Document]
     model: Optional[str] = None
 
 
