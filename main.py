@@ -164,7 +164,7 @@ def search_answer(request: AnswerRequest):
     """Answer a question using RAG on indexed documents."""
     try:
         question = request.question
-        documents = request.documents
+        documents = _docs_to_dicts(request.documents)
 
         if not question:
             raise HTTPException(status_code=400, detail="Question is required")
@@ -223,6 +223,11 @@ def search_answer(request: AnswerRequest):
         raise HTTPException(status_code=500, detail="Could not generate answer")
 
 
+def _docs_to_dicts(documents):
+    """Convert Document objects to dictionaries."""
+    return [doc.model_dump() if hasattr(doc, 'model_dump') else dict(doc) for doc in documents]
+
+
 @app.post("/api/search/answer-stream")
 async def search_answer_stream(request: AnswerRequest):
     """Stream progress while answering a question about selected documents."""
@@ -244,6 +249,7 @@ async def search_answer_stream(request: AnswerRequest):
             def answer_task():
                 import math
                 progress("Ranking documents...")
+                docs_list = _docs_to_dicts(request.documents)
                 question_embedding = llm_client._embed(question)
 
                 def cosine_similarity(a, b):
@@ -255,8 +261,8 @@ async def search_answer_stream(request: AnswerRequest):
                     return dot / (mag_a * mag_b)
 
                 scored = []
-                total = len(documents)
-                for idx, doc in enumerate(documents, 1):
+                total = len(docs_list)
+                for idx, doc in enumerate(docs_list, 1):
                     progress(f"Analyzing {idx}/{total}: {doc.get('title', 'Document')}")
                     if "embedding" not in doc:
                         try:
@@ -284,7 +290,7 @@ async def search_answer_stream(request: AnswerRequest):
                 return {
                     "question": question,
                     "summary": answer,
-                    "document_count": len(documents),
+                    "document_count": len(docs_list),
                     "sources": [{"id": i, "title": doc["title"]} for i, doc in enumerate(relevant_docs)]
                 }
 
