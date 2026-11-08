@@ -43,6 +43,23 @@ class SearchIndexRequest(BaseModel):
     search_text: Optional[str] = None
 
 
+class NotebookCreateRequest(BaseModel):
+    name: str
+    description: str = ""
+
+
+class NotebookPushRequest(BaseModel):
+    notebook_id: str
+    document_ids: list[int]
+
+
+class NotebookPushResult(BaseModel):
+    id: int
+    title: str
+    status: Literal["sent", "skipped", "failed"]
+    detail: Optional[str] = None
+
+
 class HealthStatus(BaseModel):
     paperless: bool
     ollama: bool

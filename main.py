@@ -1,19 +1,23 @@
-import asyncio
-import json
 import logging
 import os
-import queue
+import secrets
 from contextlib import asynccontextmanager
 
+import httpx
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import StreamingResponse, FileResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.llm import LLMClient
-from app.models import HealthStatus, SearchRequest, SearchResult, AnswerRequest, SearchIndexRequest
+from app.models import (
+    HealthStatus, SearchRequest, SearchResult, AnswerRequest, SearchIndexRequest,
+    NotebookCreateRequest, NotebookPushRequest, NotebookPushResult,
+)
+from app.notebook import OpenNotebookClient
 from app.orchestrator import SearchAndSummarize
 from app.paperless import PaperlessClient
+from app.streaming import progress_events
 
 import pathlib
 env_path = pathlib.Path(__file__).parent / ".env"
@@ -27,11 +31,28 @@ logging.basicConfig(
 paperless_client: PaperlessClient = None
 llm_client: LLMClient = None
 orchestrator: SearchAndSummarize = None
+notebook_client: OpenNotebookClient = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global paperless_client, llm_client, orchestrator
+    global paperless_client, llm_client, orchestrator, notebook_client
+
+    api_key = os.getenv("API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError(
+            "API_KEY environment variable is required — authentication is mandatory. "
+            "Set API_KEY in your environment (e.g. the Portainer stack) and redeploy."
+        )
+    app.state.api_key = api_key
+
+    # Optional integration: off unless OPEN_NOTEBOOK_URL is set
+    open_notebook_url = os.getenv("OPEN_NOTEBOOK_URL", "").strip()
+    if open_notebook_url:
+        notebook_client = OpenNotebookClient(open_notebook_url, os.getenv("OPEN_NOTEBOOK_PASSWORD", ""))
+        logging.info(f"Open Notebook integration enabled at {open_notebook_url}")
+    else:
+        logging.info("Open Notebook integration disabled (OPEN_NOTEBOOK_URL not set)")
 
     paperless_url = os.environ["PAPERLESS_URL"]
     paperless_token = os.environ["PAPERLESS_TOKEN"]
@@ -53,6 +74,112 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Paperless LLM Search", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def require_api_key(request: Request, call_next):
+    """Gate all /api/* routes behind the X-API-Key header. Static files and the
+    UI shell are served freely; the document data is what is protected."""
+    if request.url.path.startswith("/api/"):
+        provided = request.headers.get("X-API-Key", "")
+        if not secrets.compare_digest(provided, app.state.api_key):
+            return JSONResponse(status_code=401, content={"detail": "Invalid or missing API key"})
+    return await call_next(request)
+
+
+def require_notebook_client() -> None:
+    if notebook_client is None:
+        raise HTTPException(status_code=404, detail="Open Notebook integration is not configured")
+
+
+@app.get("/api/notebooks")
+def list_notebooks():
+    require_notebook_client()
+    try:
+        return notebook_client.list_notebooks()
+    except httpx.HTTPError as e:
+        logging.warning(f"Open Notebook unreachable: {e}")
+        raise HTTPException(status_code=503, detail="Open Notebook is unreachable")
+
+
+@app.post("/api/notebooks")
+def create_notebook(request: NotebookCreateRequest):
+    require_notebook_client()
+    name = request.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Notebook name cannot be empty")
+    try:
+        if any(n["name"].lower() == name.lower() for n in notebook_client.list_notebooks()):
+            raise HTTPException(status_code=409, detail=f"A notebook named “{name}” already exists")
+        return notebook_client.create_notebook(name, request.description.strip())
+    except httpx.HTTPError as e:
+        logging.warning(f"Notebook creation failed: {e}")
+        raise HTTPException(status_code=502, detail="Open Notebook could not create the notebook")
+
+
+@app.post("/api/notebooks/push", response_model=list[NotebookPushResult])
+def push_to_notebook(request: NotebookPushRequest):
+    """Copy the Paperless text of each document into an Open Notebook notebook.
+    Content is read fresh from Paperless, so re-OCR'd text is what gets sent."""
+    require_notebook_client()
+    if not request.document_ids:
+        raise HTTPException(status_code=400, detail="No documents selected")
+    try:
+        existing = notebook_client.source_titles(request.notebook_id)
+        transformations = notebook_client.default_transformations()
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 404:
+            raise HTTPException(status_code=404,
+                                detail="That notebook no longer exists in Open Notebook. Pick another one.")
+        logging.warning(f"Open Notebook error: {e}")
+        raise HTTPException(status_code=502, detail=f"Open Notebook returned {e.response.status_code}")
+    except httpx.HTTPError as e:
+        logging.warning(f"Open Notebook unreachable: {e}")
+        raise HTTPException(status_code=503, detail="Open Notebook is unreachable")
+
+    results = []
+    for doc_id in request.document_ids:
+        try:
+            doc = paperless_client.get_document_detail(doc_id)
+        except httpx.HTTPStatusError as e:
+            detail = ("Not found in Paperless" if e.response.status_code == 404
+                      else f"Paperless returned {e.response.status_code}")
+            results.append(NotebookPushResult(id=doc_id, title=f"#{doc_id}", status="failed", detail=detail))
+            continue
+        except httpx.HTTPError as e:
+            results.append(NotebookPushResult(id=doc_id, title=f"#{doc_id}", status="failed",
+                                              detail=f"Paperless unreachable: {e}"))
+            continue
+
+        title = " ".join(p for p in (doc["created"], doc["correspondent"], doc["title"]) if p)
+        if title in existing:
+            results.append(NotebookPushResult(id=doc_id, title=title, status="skipped",
+                                              detail="Already in this notebook"))
+            continue
+        if not doc["content"].strip():
+            results.append(NotebookPushResult(id=doc_id, title=title, status="failed",
+                                              detail="Document has no text in Paperless"))
+            continue
+
+        header = "\n".join(line for line in (
+            f"Paperless document #{doc_id}",
+            f"Title: {doc['title']}",
+            f"Correspondent: {doc['correspondent']}" if doc["correspondent"] else "",
+            f"Date: {doc['created']}" if doc["created"] else "",
+        ) if line)
+        try:
+            notebook_client.add_text_source(request.notebook_id, title,
+                                            f"{header}\n\n{doc['content']}", transformations)
+            existing.add(title)
+            results.append(NotebookPushResult(id=doc_id, title=title, status="sent"))
+        except httpx.HTTPError as e:
+            logging.warning(f"Push of document {doc_id} failed: {e}")
+            results.append(NotebookPushResult(id=doc_id, title=title, status="failed",
+                                              detail=f"Open Notebook: {e}"))
+
+    logging.info(f"Pushed to {request.notebook_id}: "
+                 + ", ".join(f"{r.id}={r.status}" for r in results))
+    return results
 
 
 @app.get("/api/health", response_model=HealthStatus)
@@ -161,71 +288,24 @@ def search_index(request: SearchIndexRequest):
 
 @app.post("/api/search/answer")
 def search_answer(request: AnswerRequest):
-    """Answer a question using RAG on indexed documents."""
+    """Answer a question using RAG on the supplied documents."""
+    if not request.question:
+        raise HTTPException(status_code=400, detail="Question is required")
+    if not request.documents:
+        raise HTTPException(status_code=400, detail="No documents provided")
+
     try:
-        question = request.question
-        documents = _docs_to_dicts(request.documents)
-
-        if not question:
-            raise HTTPException(status_code=400, detail="Question is required")
-        if not documents:
-            raise HTTPException(status_code=400, detail="No documents provided")
-
-        logging.info(f"Answering question about {len(documents)} documents")
-
-        # Embed question and documents for ranking
-        logging.info(f"Embedding question and {len(documents)} documents for ranking")
-        question_embedding = llm_client._embed(question)
-
-        # Rank documents by embedding similarity
-        import math
-        def cosine_similarity(a, b):
-            dot = sum(x * y for x, y in zip(a, b))
-            mag_a = math.sqrt(sum(x * x for x in a))
-            mag_b = math.sqrt(sum(x * x for x in b))
-            if mag_a == 0 or mag_b == 0:
-                return 0.0
-            return dot / (mag_a * mag_b)
-
-        scored = []
-        for doc in documents:
-            if "embedding" not in doc:
-                try:
-                    doc["embedding"] = llm_client._embed(f"{doc['title']}\n{doc['content']}")
-                except Exception as e:
-                    logging.warning(f"Failed to embed '{doc.get('title')}': {e} — scoring 0")
-                    scored.append((0.0, doc))
-                    continue
-            score = cosine_similarity(question_embedding, doc["embedding"])
-            scored.append((score, doc))
-
-        scored.sort(key=lambda x: x[0], reverse=True)
-        import os
-        top_k = int(os.getenv("MAX_SUMMARY", "5"))
-        relevant_docs = [doc for _, doc in scored[:top_k]]
-        logging.info(f"Selected {len(relevant_docs)} most relevant documents for answer")
-
-        # Combine relevant documents and answer the question with RAG
-        combined_text = "\n\n---\n\n".join(
-            f"Document: {doc['title']}\n{doc['content']}" for doc in relevant_docs
-        )
-        selected_model = request.model
-        answer = llm_client.rag_answer(combined_text, question, model=selected_model)
-
+        logging.info(f"Answering question about {len(request.documents)} documents")
+        answer, relevant_docs = orchestrator.answer(request.question, request.documents, model=request.model)
         return {
-            "question": question,
+            "question": request.question,
             "answer": answer,
-            "document_count": len(documents),
-            "relevant_count": len(relevant_docs)
+            "document_count": len(request.documents),
+            "relevant_count": len(relevant_docs),
         }
     except Exception:
         logging.exception("Error generating answer")
         raise HTTPException(status_code=500, detail="Could not generate answer")
-
-
-def _docs_to_dicts(documents):
-    """Convert Document objects to dictionaries."""
-    return [doc.model_dump() if hasattr(doc, 'model_dump') else dict(doc) for doc in documents]
 
 
 @app.post("/api/search/answer-stream")
@@ -236,101 +316,18 @@ async def search_answer_stream(request: AnswerRequest):
     if not request.documents:
         raise HTTPException(status_code=400, detail="No documents provided")
 
-    progress_queue: queue.SimpleQueue = queue.SimpleQueue()
+    def work(progress):
+        answer, relevant_docs = orchestrator.answer(
+            request.question, request.documents, model=request.model, progress=progress
+        )
+        return {
+            "question": request.question,
+            "summary": answer,
+            "document_count": len(request.documents),
+            "sources": [{"id": doc.id, "title": doc.title} for doc in relevant_docs],
+        }
 
-    def progress(message: str):
-        progress_queue.put({"type": "progress", "message": message})
-
-    async def event_generator():
-        try:
-            question = request.question
-            documents = request.documents
-
-            def answer_task():
-                import math
-                progress("Ranking documents...")
-                docs_list = _docs_to_dicts(request.documents)
-                question_embedding = llm_client._embed(question)
-
-                def cosine_similarity(a, b):
-                    dot = sum(x * y for x, y in zip(a, b))
-                    mag_a = math.sqrt(sum(x * x for x in a))
-                    mag_b = math.sqrt(sum(x * x for x in b))
-                    if mag_a == 0 or mag_b == 0:
-                        return 0.0
-                    return dot / (mag_a * mag_b)
-
-                scored = []
-                total = len(docs_list)
-                for idx, doc in enumerate(docs_list, 1):
-                    progress(f"Analyzing {idx}/{total}: {doc.get('title', 'Document')}")
-                    if "embedding" not in doc:
-                        try:
-                            doc["embedding"] = llm_client._embed(f"{doc['title']}\n{doc['content']}")
-                        except Exception as e:
-                            logging.warning(f"Failed to embed '{doc.get('title')}': {e}")
-                            scored.append((0.0, doc))
-                            continue
-                    score = cosine_similarity(question_embedding, doc["embedding"])
-                    scored.append((score, doc))
-
-                progress("Selecting most relevant documents...")
-                scored.sort(key=lambda x: x[0], reverse=True)
-                import os
-                top_k = int(os.getenv("MAX_SUMMARY", "5"))
-                relevant_docs = [doc for _, doc in scored[:top_k]]
-
-                progress("Generating answer...")
-                combined_text = "\n\n---\n\n".join(
-                    f"Document: {doc['title']}\n{doc['content']}" for doc in relevant_docs
-                )
-                selected_model = request.model
-                answer = llm_client.rag_answer(combined_text, question, model=selected_model)
-
-                return {
-                    "question": question,
-                    "summary": answer,
-                    "document_count": len(docs_list),
-                    "sources": [{"id": i, "title": doc["title"]} for i, doc in enumerate(relevant_docs)]
-                }
-
-            search_task = asyncio.create_task(asyncio.to_thread(answer_task))
-
-            # Yield progress messages while task is running
-            while not search_task.done():
-                while not progress_queue.empty():
-                    try:
-                        msg = progress_queue.get_nowait()
-                        logging.debug(f"Yielding progress: {msg}")
-                        yield f"data: {json.dumps(msg)}\n\n"
-                    except Exception as e:
-                        logging.exception("Error getting progress message")
-                        break
-                await asyncio.sleep(0.1)
-
-            # Drain any remaining progress messages
-            while not progress_queue.empty():
-                try:
-                    msg = progress_queue.get_nowait()
-                    logging.debug(f"Yielding final progress: {msg}")
-                    yield f"data: {json.dumps(msg)}\n\n"
-                except Exception as e:
-                    logging.exception("Error draining progress")
-                    break
-
-            # Get the result
-            try:
-                result = await search_task
-                logging.info(f"Search completed, yielding result")
-                yield f"data: {json.dumps({'type': 'result', 'data': result})}\n\n"
-            except Exception as e:
-                logging.exception("Error during answer generation")
-                yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
-        except Exception as e:
-            logging.exception("Unexpected error in event generator")
-            yield f"data: {json.dumps({'type': 'error', 'message': 'An unexpected error occurred'})}\n\n"
-
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    return StreamingResponse(progress_events(work), media_type="text/event-stream")
 
 
 @app.post("/api/search", response_model=SearchResult)
@@ -351,64 +348,18 @@ async def search_stream(request: SearchRequest):
     if not request.question.strip():
         raise HTTPException(status_code=400, detail="Question cannot be empty")
 
-    progress_queue: queue.SimpleQueue = queue.SimpleQueue()
+    def work(progress):
+        return orchestrator.process(request.question, request.mode, progress, model=request.model).model_dump()
 
-    def progress(message: str):
-        progress_queue.put({"type": "progress", "message": message})
-
-    async def event_generator():
-        try:
-            logging.info(f"Starting stream for question: {request.question!r}")
-            search_task = asyncio.create_task(
-                asyncio.to_thread(orchestrator.process, request.question, request.mode, progress, model=request.model)
-            )
-            logging.info("Search task created")
-
-            # Yield progress messages while task is running
-            while not search_task.done():
-                while not progress_queue.empty():
-                    try:
-                        msg = progress_queue.get_nowait()
-                        logging.debug(f"Yielding progress: {msg}")
-                        yield f"data: {json.dumps(msg)}\n\n"
-                    except Exception as e:
-                        logging.exception("Error getting progress message from queue")
-                        break
-                await asyncio.sleep(0.1)
-
-            # Drain any remaining progress messages after task completes
-            while not progress_queue.empty():
-                try:
-                    msg = progress_queue.get_nowait()
-                    logging.debug(f"Yielding final progress: {msg}")
-                    yield f"data: {json.dumps(msg)}\n\n"
-                except Exception as e:
-                    logging.exception("Error draining final progress messages")
-                    break
-
-            # Get the result - await the task to catch any exceptions it raised
-            try:
-                result = await search_task
-                result_dict = result.model_dump()
-                logging.info(f"Search completed, yielding result with {result.document_count} documents")
-                yield f"data: {json.dumps({'type': 'result', 'data': result_dict})}\n\n"
-            except ConnectionError as e:
-                logging.error(f"Connection error during search: {e}")
-                yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
-            except Exception as e:
-                logging.exception("Unexpected error during streaming search")
-                yield f"data: {json.dumps({'type': 'error', 'message': 'An unexpected error occurred'})}\n\n"
-        except Exception as e:
-            logging.exception("Unexpected error in event generator")
-            yield f"data: {json.dumps({'type': 'error', 'message': 'An unexpected error occurred'})}\n\n"
-
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    return StreamingResponse(progress_events(work), media_type="text/event-stream")
 
 
 @app.get("/")
 async def root():
     """Serve the main UI."""
-    return FileResponse("static/index.html", media_type="text/html")
+    # no-cache: browsers revalidate, so a new release shows up on a normal reload
+    return FileResponse("static/index.html", media_type="text/html",
+                        headers={"Cache-Control": "no-cache"})
 
 
 app.mount("/", StaticFiles(directory="static", html=True), name="static")

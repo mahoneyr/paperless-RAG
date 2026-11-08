@@ -41,6 +41,23 @@ class PaperlessClient:
         data = self._get(f"/api/documents/{doc_id}/")
         return data.get("content", "")
 
+    def get_document_detail(self, doc_id: int) -> dict:
+        """Title, date, correspondent name and content for one document."""
+        data = self._get(f"/api/documents/{doc_id}/")
+        correspondent = ""
+        if data.get("correspondent"):
+            try:
+                correspondent = self._get(f"/api/correspondents/{data['correspondent']}/").get("name", "")
+            except httpx.HTTPError:
+                logger.warning(f"Could not resolve correspondent for document {doc_id}")
+        return {
+            "id": data["id"],
+            "title": data.get("title", ""),
+            "created": (data.get("created") or "")[:10],
+            "correspondent": correspondent,
+            "content": data.get("content", ""),
+        }
+
     def _get_names(self, path: str) -> list[str]:
         names = []
         params = {"page_size": 500}
