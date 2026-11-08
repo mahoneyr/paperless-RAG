@@ -4,7 +4,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable, Optional
 
 from .paperless import PaperlessClient
-from .llm import LLMClient
+from .llm import LLMClient, DOC_MAX_CHARS
 from .models import SearchResult, SourceDoc
 from .filters import extract_filters, build_filter_string
 
@@ -88,31 +88,35 @@ class SearchAndSummarize:
 
     def _fast(self, question: str, documents, progress: Progress, model: str = None) -> tuple[str, list]:
         _progress(progress, f"Ranking {len(documents)} documents by relevance...")
-        top_docs = self.llm.rank_documents(documents, question)
-        _progress(progress, f"Summarizing top {len(top_docs)} documents...")
+        selected = self.llm.select_relevant(documents, question)
+        _progress(progress, f"Summarizing top {len(selected)} documents...")
         combined = "\n\n---\n\n".join(
-            f"Document: {doc.title} (ID: {doc.id})\n{doc.content}"
-            for doc in top_docs
+            f"Document: {doc.title} (ID: {doc.id})\n{context}"
+            for doc, _, context in selected
         )
-        return self.llm.summarize(combined, question, model=model), top_docs
+        return self.llm.summarize(combined, question, model=model), [doc for doc, _, _ in selected]
 
     def answer(self, question: str, documents, model: str = None, progress: Progress = None) -> tuple[str, list]:
         """Rank pre-supplied documents by relevance and answer the question with RAG."""
         _progress(progress, f"Ranking {len(documents)} documents by relevance...")
-        top_docs = self.llm.rank_documents(documents, question, progress=progress)
+        selected = self.llm.select_relevant(documents, question, progress=progress)
         _progress(progress, "Generating answer...")
         combined = "\n\n---\n\n".join(
-            f"Document: {doc.title}\n{doc.content}" for doc in top_docs
+            f"Document: {doc.title}\n{context}" for doc, _, context in selected
         )
-        return self.llm.rag_answer(combined, question, model=model), top_docs
+        return self.llm.rag_answer(combined, question, model=model), [doc for doc, _, _ in selected]
 
     def _thinking(self, question: str, documents, progress: Progress, model: str = None) -> tuple[str, list]:
         total = len(documents)
         doc_summaries: list[tuple[str, str]] = [None] * total
+        # Every document is read in this mode, so each gets the full per-document budget
+        _progress(progress, f"Finding the relevant passages in {total} documents...")
+        contexts = {doc.id: context for doc, _, context in self.llm.select_relevant(
+            documents, question, total_budget=DOC_MAX_CHARS * total, top_k=total)}
 
         def summarize_one(index: int, doc):
             _progress(progress, f"Analyzing {index + 1}/{total}: {doc.title}")
-            summary = self.llm.summarize_document(doc.title, doc.content, question, model=model)
+            summary = self.llm.summarize_document(doc.title, contexts.get(doc.id, doc.content), question, model=model)
             _progress(progress, f"Done {index + 1}/{total}: {doc.title}")
             return index, doc.title, summary
 

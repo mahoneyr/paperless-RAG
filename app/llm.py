@@ -1,14 +1,22 @@
+import hashlib
 import math
 import logging
 import os
+import threading
 import time
+from collections import OrderedDict
+
 import httpx
+
+from .chunking import split_text
 
 logger = logging.getLogger(__name__)
 
-MAX_CHARS = 80000       # ~20k tokens for single-pass summarization
-DOC_MAX_CHARS = 20000   # per-document cap for map-reduce individual summaries
-EMBED_MAX_CHARS = 8000  # truncation for embedding input
+MAX_CHARS = 80000       # ~20k tokens: total document text sent to the answering model
+DOC_MAX_CHARS = 20000   # per-document cap; longer documents are reduced to their best passages
+EMBED_MAX_CHARS = 8000  # safety cap on a single embedding input (passages are far smaller)
+EMBED_BATCH = 32        # passages per /api/embed request
+PASSAGE_CACHE_DOCS = int(os.getenv("PASSAGE_CACHE_DOCS", "500"))  # documents whose passage embeddings stay in memory
 
 SUMMARIZE_PROMPT = """\
 Answer this question using only the documents below. Do not summarize the documents. \
@@ -57,6 +65,20 @@ Documents:
 Answer:"""
 
 
+def _context_from_passages(content: str, scored: list[tuple[float, int, str]], budget: int) -> str:
+    """Whole document if it fits ``budget``; otherwise its best passages in document order."""
+    if len(content) <= budget:
+        return content
+    chosen, used = [], 0
+    for score, offset, passage in sorted(scored, key=lambda s: s[0], reverse=True):
+        if used + len(passage) > budget:
+            continue
+        chosen.append((offset, passage))
+        used += len(passage)
+    chosen.sort()
+    return "\n[…]\n".join(p for _, p in chosen)
+
+
 def _cosine_similarity(a: list[float], b: list[float]) -> float:
     dot = sum(x * y for x, y in zip(a, b))
     mag_a = math.sqrt(sum(x * x for x in a))
@@ -71,6 +93,8 @@ class LLMClient:
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.embed_model = embed_model
+        self._passage_cache: OrderedDict = OrderedDict()
+        self._cache_lock = threading.Lock()
 
     def _generate(self, prompt: str, model: str = None) -> str:
         url = f"{self.base_url}/api/generate"
@@ -79,6 +103,7 @@ class LLMClient:
             "model": selected_model,
             "prompt": prompt,
             "stream": False,
+            "think": False,
             "options": {"num_ctx": int(os.getenv("OLLAMA_CTX", "131072"))},
         }
 
@@ -108,35 +133,86 @@ class LLMClient:
         return result
 
     def _embed(self, text: str) -> list[float]:
-        url = f"{self.base_url}/api/embed"
-        payload = {"model": self.embed_model, "input": text[:EMBED_MAX_CHARS]}
-        with httpx.Client(timeout=30) as client:
-            response = client.post(url, json=payload)
-            if response.status_code == 404:
-                raise ValueError(f"Ollama embed model '{self.embed_model}' not found — check OLLAMA_EMBED_MODEL in your .env")
-            response.raise_for_status()
-            return response.json()["embeddings"][0]
+        return self._embed_many([text])[0]
 
-    def rank_documents(self, documents, question: str, progress=None):
-        logger.info(f"Embedding and ranking {len(documents)} documents")
-        question_vec = self._embed(question)
-        scored = []
+    def _embed_many(self, texts: list[str]) -> list[list[float]]:
+        """Embed several texts, EMBED_BATCH per request."""
+        url = f"{self.base_url}/api/embed"
+        vectors = []
+        with httpx.Client(timeout=120) as client:
+            for i in range(0, len(texts), EMBED_BATCH):
+                batch = [t[:EMBED_MAX_CHARS] for t in texts[i:i + EMBED_BATCH]]
+                response = client.post(url, json={"model": self.embed_model, "input": batch})
+                if response.status_code == 404:
+                    raise ValueError(f"Ollama embed model '{self.embed_model}' not found — check OLLAMA_EMBED_MODEL in your .env")
+                response.raise_for_status()
+                vectors.extend(response.json()["embeddings"])
+        return vectors
+
+    def _uses_gemma_prompts(self) -> bool:
+        # EmbeddingGemma is trained with task prefixes; omitting them lowers retrieval quality
+        return "embeddinggemma" in self.embed_model.lower()
+
+    def embed_query(self, question: str) -> list[float]:
+        if self._uses_gemma_prompts():
+            return self._embed(f"task: search result | query: {question}")
+        return self._embed(question)
+
+    def _passage_vectors(self, doc) -> list[tuple[int, str, list[float]]]:
+        """(offset, passage, vector) for every passage of a document, cached by content."""
+        key = (self.embed_model, doc.id, hashlib.sha1(f"{doc.title}\0{doc.content}".encode()).hexdigest())
+        with self._cache_lock:
+            if key in self._passage_cache:
+                self._passage_cache.move_to_end(key)
+                return self._passage_cache[key]
+
+        passages = split_text(doc.content)
+        if not passages:  # no text at all: let the title stand in
+            passages = [(0, "")]
+        if self._uses_gemma_prompts():
+            texts = [f"title: {doc.title or 'none'} | text: {p}" for _, p in passages]
+        else:
+            texts = [f"{doc.title}\n{p}" for _, p in passages]
+        vectors = self._embed_many(texts)
+        result = [(off, p, v) for (off, p), v in zip(passages, vectors)]
+
+        with self._cache_lock:
+            self._passage_cache[key] = result
+            while len(self._passage_cache) > PASSAGE_CACHE_DOCS:
+                self._passage_cache.popitem(last=False)
+        return result
+
+    def select_relevant(self, documents, question: str, progress=None,
+                        total_budget: int = MAX_CHARS, top_k: int = None):
+        """Rank documents by their best-matching passage and build each top document's context.
+
+        Returns [(doc, score, context_text)] for the top MAX_SUMMARY documents. A document that
+        fits its share of the budget is passed whole; a longer one is reduced to its passages
+        most similar to the question, kept in document order, so text deep inside it is
+        both searchable and visible to the answering model.
+        """
+        logger.info(f"Embedding and ranking {len(documents)} documents by passage")
+        question_vec = self.embed_query(question)
+        ranked = []
         total = len(documents)
         for idx, doc in enumerate(documents, 1):
             if progress:
                 progress(f"Analyzing {idx}/{total}: {doc.title}")
             try:
-                doc_vec = self._embed(f"{doc.title}\n{doc.content}")
-                score = _cosine_similarity(question_vec, doc_vec)
+                scored = [(_cosine_similarity(question_vec, v), off, p)
+                          for off, p, v in self._passage_vectors(doc)]
             except Exception as e:
                 logger.warning(f"Failed to embed '{doc.title}': {e} — scoring 0")
-                score = 0.0
-            scored.append((score, doc))
-        scored.sort(key=lambda x: x[0], reverse=True)
-        top_k = int(os.getenv("MAX_SUMMARY", "5"))
-        top = [doc for _, doc in scored[:top_k]]
-        logger.info(f"Top {len(top)} docs: {[d.title for d in top]}")
-        return top
+                scored = [(0.0, 0, doc.content)]
+            ranked.append((max(s for s, _, _ in scored), doc, scored))
+
+        ranked.sort(key=lambda r: r[0], reverse=True)
+        top = ranked[:top_k or int(os.getenv("MAX_SUMMARY", "5"))]
+        per_doc = min(DOC_MAX_CHARS, total_budget // max(len(top), 1))
+        selected = [(doc, score, _context_from_passages(doc.content, scored, per_doc))
+                    for score, doc, scored in top]
+        logger.info("Top docs: " + ", ".join(f"{d.title} ({s:.3f})" for d, s, _ in selected))
+        return selected
 
     def summarize(self, documents_text: str, question: str, model: str = None) -> str:
         logger.info("Summarizing documents (single-pass)")

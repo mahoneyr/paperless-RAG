@@ -7,10 +7,11 @@ A question-answering interface for [Paperless-NGX](https://docs.paperless-ngx.co
 - **No Pre-Indexing Required** — Unlike other RAG applications, index and ask questions on-the-fly. Select documents dynamically and get answers in real-time without batch processing
 - **Document Filtering** — Filter documents by type, correspondent, tags, and text search
 - **Document Selection** — Choose which documents to use for Q&A from search results
-- **Smart Ranking** — Ranks selected documents by relevance using embedding similarity
+- **Smart Ranking** — Ranks selected documents by relevance using embedding similarity, passage by passage, so a fact deep inside a long document is still found and shown to the model
 - **Ask Questions** — Get synthesized answers from your selected documents using an LLM
 - **Web UI** — Clean, responsive interface for searching, selecting, and asking questions
 - **Flexible Model Selection** — Use local models via Ollama for full privacy, or cloud models like Gemini for better quality (your choice)
+- **Send to Open Notebook (optional)** — Push selected documents' text into an [Open Notebook](https://github.com/lfnovo/open-notebook) notebook, or create a new notebook from the dropdown. Only the Paperless text content is sent, not the PDF, so any OCR improvements made in Paperless carry over
 
 ## Workflow
 
@@ -81,7 +82,27 @@ OLLAMA_EMBED_MODEL=embeddinggemma
 # Optional settings
 MAX_RESULTS=20             # Max documents to retrieve per search
 MAX_SUMMARY=5              # Max documents to use for answer synthesis
+PASSAGE_CACHE_DOCS=500     # Documents whose passage embeddings are kept in memory between questions
+
+# Optional: Open Notebook integration (leave unset to disable)
+OPEN_NOTEBOOK_URL=http://your-open-notebook-host:5055
+OPEN_NOTEBOOK_PASSWORD=    # only if Open Notebook is password-protected
 ```
+
+### Open Notebook integration
+
+When `OPEN_NOTEBOOK_URL` is set, a notebook dropdown and a **Send to notebook** button
+appear under the search results. Choose **➕ New notebook…** in the dropdown to create one.
+
+- Each selected document becomes a text source titled `<date> <correspondent> <title>`,
+  with a short header giving its Paperless document ID.
+- Text is read fresh from Paperless at send time, and documents already in the target
+  notebook (same title) are skipped.
+- Open Notebook embeds each source for search and applies its default transformations
+  (such as Dense Summary) in the background.
+
+Point `OPEN_NOTEBOOK_URL` at Open Notebook's **API** port (5055 by default), not the web UI port.
+If Paperless's OCR is poor, fix it there first — this sends exactly the text Paperless holds.
 
 ### Getting API credentials
 
@@ -132,6 +153,22 @@ The server starts on `http://localhost:8000`. Open it in your browser to access 
 ## Technical Details
 
 The sections below are for developers and integrators. Most users only need to open `http://localhost:8000` in a browser to get started.
+
+### How documents are ranked and read
+
+1. Each candidate document is split into passages of about 1,500 characters (~400 tokens),
+   with a 200-character overlap, breaking at paragraph or sentence boundaries.
+2. Every passage is embedded, and a document's score is its **best passage's** similarity to
+   the question. One relevant clause on page 40 is enough to rank a long document highly.
+3. The top `MAX_SUMMARY` documents go to the LLM. A document that fits its share of the
+   80,000-character budget (at most 20,000 characters each) is sent whole. A longer one is
+   reduced to its passages most similar to the question, kept in document order and
+   separated by `[…]`.
+4. Passage embeddings are cached in memory per document and content, so follow-up questions
+   skip re-embedding, and an edited document is re-embedded automatically.
+
+With `embeddinggemma`, queries and passages get the model's recommended task prefixes
+(`task: search result | query: …` and `title: … | text: …`). Other embedding models get plain text.
 
 ### Authentication
 
@@ -202,6 +239,14 @@ Content-Type: application/json
 ```
 Returns a streaming response of the answer using Server-Sent Events (SSE).
 
+### Open Notebook (only when `OPEN_NOTEBOOK_URL` is set; otherwise these return 404)
+```
+GET  /api/notebooks              # list notebooks
+POST /api/notebooks              # create: {"name": "Medical", "description": ""}
+POST /api/notebooks/push         # send: {"notebook_id": "notebook:abc", "document_ids": [3493, 3474]}
+```
+`push` returns one result per document with `status` set to `sent`, `skipped` or `failed`.
+
 ## Development
 
 This project was developed with AI assistance (Claude).
@@ -212,8 +257,11 @@ paperless-llm/
 ├── main.py                 # FastAPI server and routes
 ├── app/
 │   ├── paperless.py       # Paperless-NGX client
+│   ├── notebook.py        # Open Notebook client (optional integration)
 │   ├── llm.py             # Ollama LLM and embedding client
 │   ├── orchestrator.py     # Search and answer synthesis logic
+│   ├── chunking.py        # Splits documents into passages for embedding
+│   ├── streaming.py       # Server-Sent Events progress helper
 │   ├── filters.py         # Filter helper functions
 │   └── models.py          # Pydantic models
 ├── static/
@@ -231,6 +279,10 @@ Edit `.env` and set `OLLAMA_MODEL` to your model name, then restart the server.
 **"Could not fetch filters"** — Check that Paperless is running and accessible at `PAPERLESS_URL`.
 
 **"Connection refused to Ollama"** — Ensure Ollama is running and `OLLAMA_URL` is correct. Models may take time to load on first use.
+
+**No notebook dropdown** — `OPEN_NOTEBOOK_URL` is not set; the integration is off by default.
+
+**"Open Notebook is unreachable"** — Check `OPEN_NOTEBOOK_URL` points at the API port (5055) and is reachable from this container. In Docker, `localhost` means the container itself.
 
 **Slow responses** — Larger documents and models take longer. Adjust `MAX_SUMMARY` to use fewer documents, or use a faster model.
 

@@ -251,6 +251,24 @@
         </div>
     </div>
 
+    <!-- New notebook dialog -->
+    <div id="notebookModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:1000; align-items:center; justify-content:center;">
+        <div style="background:#fff; padding:28px 32px; border-radius:10px; max-width:420px; width:90%; box-shadow:0 10px 40px rgba(0,0,0,0.3);">
+            <h2 style="margin:0 0 16px; font-size:20px; color:#0066cc;">📓 New notebook</h2>
+            <input type="text" id="newNotebookName" placeholder="Name" maxlength="200"
+                   style="width:100%; padding:12px; border:2px solid #e0e0e0; border-radius:6px; font-size:14px; box-sizing:border-box;"
+                   onkeydown="if(event.key==='Enter') createNotebook(); if(event.key==='Escape') closeNotebookModal();">
+            <textarea id="newNotebookDesc" placeholder="Description (optional)" rows="3"
+                      style="width:100%; margin-top:10px; padding:12px; border:2px solid #e0e0e0; border-radius:6px; font-size:14px; box-sizing:border-box; font-family:inherit; resize:vertical;"
+                      onkeydown="if(event.key==='Escape') closeNotebookModal();"></textarea>
+            <div id="notebookModalError" style="display:none; color:#cc0000; font-size:13px; margin-top:10px;"></div>
+            <div style="display:flex; gap:10px; margin-top:16px;">
+                <button type="button" onclick="closeNotebookModal()" style="flex:1; background:#f5f5f5; color:#666; border:1px solid #ddd;">Cancel</button>
+                <button type="button" id="createNotebookBtn" onclick="createNotebook()" style="flex:1;">Create</button>
+            </div>
+        </div>
+    </div>
+
     <button onclick="changeApiKey()" title="Change API key"
             style="position:fixed; top:16px; right:16px; z-index:900; padding:8px 12px; font-size:13px;">🔑 Change key</button>
 
@@ -309,6 +327,20 @@
                     </select>
                 </div>
                 <div id="docPreview"></div>
+
+                <div id="notebookBar" style="display:none;align-items:center;gap:10px;margin-top:16px;flex-wrap:wrap;">
+                    <select id="notebookSelect" onchange="onNotebookChange(this)" style="width:260px;padding:10px 12px;font-size:13px;border:2px solid #e0e0e0;border-radius:6px;background:white;">
+                        <option value="">Loading notebooks…</option>
+                    </select>
+                    <button type="button" onclick="loadNotebooks()" title="Reload notebook list" style="padding:8px 12px;font-size:14px;background:#f5f5f5;color:#666;border:1px solid #ddd;border-radius:4px;cursor:pointer;">↻</button>
+                    <button id="pushBtn" onclick="pushToNotebook()" style="white-space:nowrap;">Send to notebook</button>
+                </div>
+                <div id="pushProgress" role="progressbar" aria-label="Sending documents" aria-valuemin="0" aria-valuenow="0"
+                     style="display:none;height:8px;margin-top:12px;background:#e0e0e0;border-radius:4px;overflow:hidden;">
+                    <div id="pushProgressFill" style="height:100%;width:0;background:linear-gradient(135deg,#0066cc 0%,#0052a3 100%);transition:width 0.3s;"></div>
+                </div>
+                <div id="pushStatus" class="status"></div>
+                <ul id="pushResults" style="margin:8px 0 0 0;padding-left:20px;font-size:13px;"></ul>
             </div>
         </div>
 
@@ -547,6 +579,7 @@
             document.getElementById('apiKeyInput').value = '';
             document.getElementById('keyModal').style.display = 'none';
             loadFilters();
+            loadNotebooks();
         }
 
         function changeApiKey() {
@@ -570,6 +603,7 @@
         window.addEventListener('load', () => {
             if (getApiKey()) {
                 loadFilters();
+                loadNotebooks();
             } else {
                 showKeyModal();
             }
@@ -860,6 +894,143 @@
             el.textContent = msg;
             el.className = 'status ' + type;
             if (type === 'success') setTimeout(() => el.className = 'status', 3000);
+        }
+
+        const NEW_NOTEBOOK = '__new__';
+        let lastNotebook = '';  // restored if the "New notebook…" dialog is cancelled
+
+        async function loadNotebooks(selectId) {
+            const select = document.getElementById('notebookSelect');
+            const wanted = selectId || (select.value !== NEW_NOTEBOOK ? select.value : lastNotebook);
+            const bar = document.getElementById('notebookBar');
+            try {
+                const res = await apiFetch('/api/notebooks');
+                // 404 = integration not configured (OPEN_NOTEBOOK_URL unset): keep the bar hidden
+                if (res.status === 404) { bar.style.display = 'none'; return; }
+                bar.style.display = 'flex';
+                if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
+                const notebooks = await res.json();
+                select.innerHTML =
+                    (notebooks.length ? '' : '<option value="">No notebooks yet</option>') +
+                    notebooks.map(n => `<option value="${n.id}">${escapeHtml(n.name)}</option>`).join('') +
+                    `<option value="${NEW_NOTEBOOK}">➕ New notebook…</option>`;
+                if (notebooks.some(n => n.id === wanted)) select.value = wanted;
+                else select.selectedIndex = 0;
+                lastNotebook = select.value;
+            } catch (e) {
+                select.innerHTML = '<option value="">Open Notebook unavailable</option>';
+                lastNotebook = '';
+            }
+        }
+
+        function onNotebookChange(select) {
+            if (select.value === NEW_NOTEBOOK) openNotebookModal();
+            else lastNotebook = select.value;
+        }
+
+        function openNotebookModal() {
+            document.getElementById('newNotebookName').value = '';
+            document.getElementById('newNotebookDesc').value = '';
+            document.getElementById('notebookModalError').style.display = 'none';
+            document.getElementById('notebookModal').style.display = 'flex';
+            document.getElementById('newNotebookName').focus();
+        }
+
+        function closeNotebookModal() {
+            document.getElementById('notebookModal').style.display = 'none';
+            document.getElementById('notebookSelect').value = lastNotebook;
+        }
+
+        async function createNotebook() {
+            const name = document.getElementById('newNotebookName').value.trim();
+            const description = document.getElementById('newNotebookDesc').value.trim();
+            const err = document.getElementById('notebookModalError');
+            if (!name) { err.textContent = 'Please enter a name.'; err.style.display = 'block'; return; }
+
+            const btn = document.getElementById('createNotebookBtn');
+            btn.disabled = true;
+            try {
+                const res = await apiFetch('/api/notebooks', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, description }),
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.detail || res.statusText);
+                document.getElementById('notebookModal').style.display = 'none';
+                await loadNotebooks(data.id);
+                showPushStatus(`Created notebook “${data.name}”.`, 'success');
+            } catch (e) {
+                err.textContent = e.message;
+                err.style.display = 'block';
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        function escapeHtml(s) {
+            return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        }
+
+        async function pushToNotebook() {
+            const notebookId = document.getElementById('notebookSelect').value;
+            const ids = [...document.querySelectorAll('.doc-checkbox:checked')].map(cb => parseInt(cb.dataset.id));
+            const list = document.getElementById('pushResults');
+            list.innerHTML = '';
+            if (!notebookId || notebookId === NEW_NOTEBOOK) { showPushStatus('Choose a notebook first', 'error'); return; }
+            if (ids.length === 0) { showPushStatus('Please select at least one document', 'error'); return; }
+
+            const btn = document.getElementById('pushBtn');
+            const progress = document.getElementById('pushProgress');
+            const fill = document.getElementById('pushProgressFill');
+            const icon = { sent: '✅', skipped: '⏭️', failed: '❌' };
+            const results = [];
+            const setProgress = done => {
+                fill.style.width = `${Math.round(100 * done / ids.length)}%`;
+                progress.setAttribute('aria-valuenow', done);
+            };
+
+            btn.disabled = true;
+            progress.setAttribute('aria-valuemax', ids.length);
+            progress.style.display = 'block';
+            setProgress(0);
+            try {
+                // One request per document so the bar and the list update as each finishes
+                for (const [i, id] of ids.entries()) {
+                    showPushStatus(`Sending ${i + 1} of ${ids.length}…`, 'loading');
+                    const res = await apiFetch('/api/notebooks/push', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ notebook_id: notebookId, document_ids: [id] }),
+                    });
+                    if (!res.ok) {
+                        if (res.status === 404) loadNotebooks();  // the chosen notebook was deleted
+                        throw new Error((await res.json()).detail || res.statusText);
+                    }
+                    for (const r of await res.json()) {
+                        results.push(r);
+                        list.insertAdjacentHTML('beforeend',
+                            `<li>${icon[r.status]} ${escapeHtml(r.title)}${r.detail ? ` — <span style="color:#999;">${escapeHtml(r.detail)}</span>` : ''}</li>`);
+                    }
+                    setProgress(i + 1);
+                }
+                const count = s => results.filter(r => r.status === s).length;
+                const summary = `Sent ${count('sent')}, skipped ${count('skipped')}, failed ${count('failed')}. ` +
+                    'Open Notebook is embedding and summarizing them in the background.';
+                showPushStatus(summary, count('failed') ? 'error' : 'success');
+            } catch (e) {
+                const done = results.length ? ` after ${results.length} of ${ids.length}` : '';
+                showPushStatus(`Send stopped${done}: ${e.message}`, 'error');
+            } finally {
+                btn.disabled = false;
+                setTimeout(() => { progress.style.display = 'none'; }, 1500);
+            }
+        }
+
+        function showPushStatus(msg, type) {
+            const el = document.getElementById('pushStatus');
+            el.textContent = msg;
+            el.className = 'status ' + type;
         }
 
         function showStatus(msg, type) {
